@@ -173,6 +173,76 @@ async function main() {
       assert.ok(body.error.fieldErrors.recipientAddress);
       assert.ok(body.error.fieldErrors.profileId);
     });
+
+    await runTest("returns paginated transactions for a valid profile", async () => {
+      const txHash = `ci-test-${randomUUID()}`;
+
+      await fetch(`${baseUrl}/support-transactions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          txHash,
+          amount: "10.0000000",
+          assetCode: "XLM",
+          recipientAddress: walletAddress,
+          profileId,
+          stellarNetwork: "TESTNET",
+          message: "Transaction pagination test"
+        })
+      });
+
+      const response = await fetch(
+        `${baseUrl}/profiles/${baseUsername}/transactions`
+      );
+
+      assert.equal(response.status, 200);
+
+      const body = await response.json();
+      assert.ok(Array.isArray(body.transactions));
+      assert.equal(typeof body.total, "number");
+      assert.ok(body.total >= 1);
+      assert.equal(body.limit, 20);
+      assert.equal(body.offset, 0);
+    });
+
+    await runTest("filters transactions by network query param", async () => {
+      const response = await fetch(
+        `${baseUrl}/profiles/${baseUsername}/transactions?network=TESTNET`
+      );
+
+      assert.equal(response.status, 200);
+
+      const body = await response.json();
+      assert.ok(Array.isArray(body.transactions));
+
+      for (const tx of body.transactions) {
+        assert.equal(tx.stellarNetwork, "TESTNET");
+      }
+    });
+
+    await runTest("respects limit and offset query params", async () => {
+      const response = await fetch(
+        `${baseUrl}/profiles/${baseUsername}/transactions?limit=1&offset=0`
+      );
+
+      assert.equal(response.status, 200);
+
+      const body = await response.json();
+      assert.ok(body.transactions.length <= 1);
+      assert.equal(body.limit, 1);
+      assert.equal(body.offset, 0);
+    });
+
+    await runTest("returns 404 for transactions of unknown profile", async () => {
+      const response = await fetch(
+        `${baseUrl}/profiles/nonexistent-user/transactions`
+      );
+
+      assert.equal(response.status, 404);
+
+      const body = await response.json();
+      assert.equal(body.error, "Profile not found");
+    });
   } finally {
     await stopServer();
   }

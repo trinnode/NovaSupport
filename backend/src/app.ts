@@ -47,6 +47,39 @@ export function createApp() {
     supporterId: z.string().optional().nullable()
   });
 
+  app.get("/profiles/:username/transactions", async (req, res) => {
+    const { username } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const network = req.query.network as string | undefined;
+
+    const profile = await prisma.profile.findUnique({
+      where: { username }
+    });
+
+    if (!profile) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
+    }
+
+    const where = {
+      recipientAddress: profile.walletAddress,
+      ...(network ? { stellarNetwork: network } : {})
+    };
+
+    const [transactions, total] = await Promise.all([
+      prisma.supportTransaction.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: "desc" }
+      }),
+      prisma.supportTransaction.count({ where })
+    ]);
+
+    res.json({ transactions, total, limit, offset });
+  });
+
   app.post("/support-transactions", async (req, res) => {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
