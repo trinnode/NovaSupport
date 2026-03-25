@@ -59,3 +59,30 @@ Install Soroban CLI separately if you want to build, deploy, or inspect the cont
 - keep naming consistent with `NovaSupport`
 
 
+## Branch Protection & CI
+
+All pull requests must pass the following CI status checks before merging to `main`:
+
+- **Frontend CI** — installs dependencies, runs tests, and builds the Next.js app (`npm run build`)
+- **Backend CI** — generates the Prisma client, applies migrations, runs backend tests (`npm run test`), and compiles TypeScript (`npm run build`)
+- **Contract CI** — builds the contract for native and WASM targets (`cargo build --release`) and runs contract tests (`cargo test`)
+
+Each workflow runs on `pull_request` events for its respective directory and on `push` to `main`. Frontend CI and Backend CI test against Node.js 18.x and 20.x.
+
+### Setting Up Branch Protection (Maintainers)
+
+1. Go to **Settings → Branches** on the GitHub repo
+2. Click **Add branch ruleset** (or edit the existing `main` rule)
+3. Set the target branch to `main`
+4. Enable **Require status checks to pass before merging**
+5. Add the following required status checks:
+   - `Test and build (Node.js 18.x)` (Frontend CI)
+   - `Test and build (Node.js 20.x)` (Frontend CI)
+   - `Backend checks (Node 18.x)` (Backend CI)
+   - `Backend checks (Node 20.x)` (Backend CI)
+   - `Contract checks` (Contract CI)
+6. Enable **Require a pull request before merging**
+7. Optionally enable **Require conversation resolution before merging**
+8. Save the ruleset
+
+
