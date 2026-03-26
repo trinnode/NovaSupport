@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { Response } from "express";
 import morgan from "morgan";
 import { z } from "zod";
+import { StrKey } from "@stellar/stellar-sdk";
 import { prisma } from "./db.js";
 
 function sendError(res: Response, status: number, message: string, code?: string) {
@@ -81,11 +82,20 @@ export function createApp() {
 
   // ── Create profile ────────────────────────────────────────────────────
 
+  const stellarAddress = z.string().refine(
+    (val) => StrKey.isValidEd25519PublicKey(val),
+    { message: "Must be a valid Stellar public key" }
+  );
+
   const createProfileSchema = z.object({
     username: z.string().min(3).max(32).regex(/^[a-z0-9-]+$/),
     displayName: z.string().min(1).max(64),
     bio: z.string().max(280).optional().default(""),
-    walletAddress: z.string().startsWith("G").length(56),
+    walletAddress: stellarAddress,
+    email: z.string().email().optional().nullable(),
+    websiteUrl: z.string().url().startsWith("https://").optional().nullable(),
+    twitterHandle: z.string().max(15).regex(/^[a-zA-Z0-9_]+$/).optional().nullable(),
+    githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
     ownerId: z.string().min(1),
     acceptedAssets: z.array(z.object({
       code: z.string().min(1).max(12),
@@ -100,7 +110,7 @@ export function createApp() {
       return sendError(res, 400, "Invalid request body");
     }
 
-    const { username, displayName, bio, walletAddress, ownerId, acceptedAssets } = parsed.data;
+    const { username, displayName, bio, walletAddress, email, websiteUrl, twitterHandle, githubHandle, ownerId, acceptedAssets } = parsed.data;
 
     try {
       const profile = await prisma.profile.create({
@@ -109,6 +119,10 @@ export function createApp() {
           displayName,
           bio,
           walletAddress,
+          email,
+          websiteUrl,
+          twitterHandle,
+          githubHandle,
           ownerId,
           acceptedAssets: { create: acceptedAssets },
         },
@@ -118,6 +132,48 @@ export function createApp() {
     } catch (e: unknown) {
       if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
         return sendError(res, 409, "Username already taken", "USERNAME_TAKEN");
+      }
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Update profile ────────────────────────────────────────────────────
+
+  const updateProfileSchema = z.object({
+    displayName: z.string().min(1).max(64).optional(),
+    bio: z.string().max(280).optional(),
+    avatarUrl: z.string().url().optional().nullable(),
+    email: z.string().email().optional().nullable(),
+    websiteUrl: z.string().url().startsWith("https://").optional().nullable(),
+    twitterHandle: z.string().max(15).regex(/^[a-zA-Z0-9_]+$/).optional().nullable(),
+    githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
+  });
+
+  app.patch("/profiles/:username", async (req, res) => {
+    const parsed = updateProfileSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return sendError(res, 400, "Invalid request body");
+    }
+
+    const profile = await prisma.profile.findUnique({
+      where: { username: req.params.username },
+    });
+
+    if (!profile) {
+      return sendError(res, 404, "Profile not found");
+    }
+
+    try {
+      const updated = await prisma.profile.update({
+        where: { username: req.params.username },
+        data: parsed.data,
+        include: { acceptedAssets: true },
+      });
+      return res.json(updated);
+    } catch (e: unknown) {
+      if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
+        return sendError(res, 409, "Email already in use", "EMAIL_TAKEN");
       }
       return sendError(res, 500, "Internal server error");
     }
