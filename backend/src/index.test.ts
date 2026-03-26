@@ -112,11 +112,11 @@ async function main() {
       const response = await fetch(`${baseUrl}/health`);
 
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), {
-        ok: true,
-        service: "NovaSupport backend",
-        network: "Stellar Testnet"
-      });
+      const body = await response.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.service, "NovaSupport backend");
+      assert.equal(body.network, "Stellar Testnet");
+      assert.equal(body.database, "connected");
     });
 
     await runTest("returns a seeded profile with accepted assets", async () => {
