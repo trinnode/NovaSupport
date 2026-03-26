@@ -20,4 +20,6 @@ Cargo.lock
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
 is.md
-
+issue.md
+pr.md
+checks.md

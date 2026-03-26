@@ -93,8 +93,6 @@ export function createApp() {
     }
   });
 
-  // ── Create profile ────────────────────────────────────────────────────
-
   const stellarAddress = z.string().refine(
     (val) => StrKey.isValidEd25519PublicKey(val),
     { message: "Must be a valid Stellar public key" }
