@@ -1,6 +1,8 @@
+import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { ProfileCard } from "@/components/profile-card";
 import { SupportPanel } from "@/components/support-panel";
+import { API_BASE_URL } from "@/lib/config";
 
 type PageProps = {
   params: {
@@ -8,42 +10,38 @@ type PageProps = {
   };
 };
 
-const sampleProfiles: Record<
-  string,
-  {
-    displayName: string;
-    bio: string;
-    walletAddress: string;
-    acceptedAssets: Array<{ code: string; issuer?: string }>;
-  }
-> = {
-  "stellar-dev": {
-    displayName: "Stellar Dev Collective",
-    bio: "Building open-source tools, onboarding guides, and wallet education for the Stellar ecosystem. NovaSupport gives this work a direct path to community funding.",
-    walletAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-    acceptedAssets: [
-      { code: "XLM" },
-      {
-        code: "USDC",
-        issuer: "GA5ZSEJYB37Y5WZL56FWSOZ5LX5K7Q4SOX7YH3Y2AWJZQURQW6Z5YB2M"
-      }
-    ]
-  }
+type Profile = {
+  username: string;
+  displayName: string;
+  bio: string;
+  walletAddress: string;
+  acceptedAssets: Array<{ code: string; issuer?: string | null }>;
 };
 
-export default function ProfilePage({ params }: PageProps) {
-  const profile = sampleProfiles[params.username] ?? {
-    displayName: "New NovaSupport Profile",
-    bio: "This route is ready for backend profile hydration. Replace the sample data with a database-backed query when the API is connected.",
-    walletAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-    acceptedAssets: [{ code: "XLM" }]
-  };
+async function getProfile(username: string): Promise<Profile> {
+  const res = await fetch(`${API_BASE_URL}/profiles/${username}`, {
+    next: { revalidate: 60 }
+  });
+
+  if (res.status === 404) {
+    notFound();
+  }
+
+  if (!res.ok) {
+    throw new Error("Failed to fetch profile");
+  }
+
+  return res.json();
+}
+
+export default async function ProfilePage({ params }: PageProps) {
+  const profile = await getProfile(params.username);
 
   return (
     <AppShell>
       <div className="space-y-8">
         <ProfileCard
-          username={params.username}
+          username={profile.username}
           displayName={profile.displayName}
           bio={profile.bio}
           walletAddress={profile.walletAddress}

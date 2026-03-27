@@ -2,7 +2,7 @@ import { isValidStellarAddress } from "@/lib/stellar";
 
 type Asset = {
   code: string;
-  issuer?: string;
+  issuer?: string | null;
 };
 
 type ProfileCardProps = {
