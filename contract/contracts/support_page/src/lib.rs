@@ -127,4 +127,68 @@ mod test {
         let event: SupportEvent = data.try_into_val(&env).expect("deserialize SupportEvent");
         assert_eq!(event.timestamp, 1_700_000_000);
     }
+
+    #[test]
+    #[should_panic(expected = "amount must be positive")]
+    fn rejects_zero_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&env, &contract_id);
+
+        let supporter = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        client.support(
+            &supporter,
+            &recipient,
+            &0_i128,
+            &String::from_str(&env, "XLM"),
+            &String::from_str(&env, "test"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "amount must be positive")]
+    fn rejects_negative_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&env, &contract_id);
+
+        let supporter = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        client.support(
+            &supporter,
+            &recipient,
+            &-1_i128,
+            &String::from_str(&env, "XLM"),
+            &String::from_str(&env, "test"),
+        );
+    }
+
+    #[test]
+    fn increments_count_across_multiple_supporters() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&env, &contract_id);
+
+        let recipient = Address::generate(&env);
+
+        for i in 1..=3 {
+            let supporter = Address::generate(&env);
+            let count = client.support(
+                &supporter,
+                &recipient,
+                &10_i128,
+                &String::from_str(&env, "XLM"),
+                &String::from_str(&env, "test"),
+            );
+            assert_eq!(count, i);
+        }
+
+        assert_eq!(client.support_count(), 3);
+    }
 }
