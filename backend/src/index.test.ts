@@ -10,7 +10,14 @@ const walletAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 
 let baseUrl = "";
 let profileId = "";
+let userId = "";
 let server: ReturnType<typeof app.listen>;
+
+const validProfilePayload = {
+  displayName: "Test Creator",
+  walletAddress,
+  acceptedAssets: [{ code: "XLM" }],
+};
 
 async function seedProfile() {
   const user = await prisma.user.upsert({
@@ -20,6 +27,8 @@ async function seedProfile() {
       email: seedEmail
     }
   });
+
+  userId = user.id;
 
   const profile = await prisma.profile.upsert({
     where: { username: baseUsername },
@@ -317,6 +326,104 @@ async function main() {
       });
 
       assert.equal(response.status, 404);
+    });
+
+    await runTest("POST /profiles - returns 201 with social fields when provided", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `social-test-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          email: "social@example.com",
+          websiteUrl: "https://example.com",
+          twitterHandle: "testhandle",
+          githubHandle: "testhandle",
+        }),
+      });
+
+      assert.equal(response.status, 201);
+      const profile = await response.json();
+      assert.equal(profile.email, "social@example.com");
+      assert.equal(profile.websiteUrl, "https://example.com");
+      assert.equal(profile.twitterHandle, "testhandle");
+      assert.equal(profile.githubHandle, "testhandle");
+    });
+
+    await runTest("POST /profiles - returns 409 EMAIL_TAKEN for duplicate email", async () => {
+      const dupEmail = `dup-${randomUUID().slice(0, 8)}@example.com`;
+
+      await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `first-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          email: dupEmail,
+        }),
+      });
+
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `second-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          email: dupEmail,
+        }),
+      });
+
+      assert.equal(response.status, 409);
+      const body = await response.json();
+      assert.equal(body.code, "EMAIL_TAKEN");
+    });
+
+    await runTest("POST /profiles - returns 400 for invalid email format", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `inv-email-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          email: "not-an-email",
+        }),
+      });
+
+      assert.equal(response.status, 400);
+    });
+
+    await runTest("POST /profiles - returns 400 for websiteUrl without https", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `inv-url-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          websiteUrl: "http://example.com",
+        }),
+      });
+
+      assert.equal(response.status, 400);
+    });
+
+    await runTest("POST /profiles - returns 400 for twitterHandle with @ prefix", async () => {
+      const response = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `inv-twit-${randomUUID().slice(0, 8)}`,
+          ownerId: userId,
+          twitterHandle: "@testhandle",
+        }),
+      });
+
+      assert.equal(response.status, 400);
     });
 
   } finally {
