@@ -255,6 +255,42 @@ export function createApp() {
     res.status(201).json(supportRecord);
   });
 
+  // ── Analytics ──────────────────────────────────────────────────────────
+
+  app.get("/analytics/:campaignId", async (req, res) => {
+    // Mock analytics logic (future: fetch optimized views from DB)
+    const { campaignId } = req.params;
+
+    const data = {
+      summary: {
+        totalRaised: 12540.5,
+        totalContributors: 142,
+        avgContribution: 88.3,
+        activeDrips: 12,
+      },
+      dailyContributions: [
+        { date: "2024-03-21", amount: 450 },
+        { date: "2024-03-22", amount: 620 },
+        { date: "2024-03-23", amount: 380 },
+        { date: "2024-03-24", amount: 940 },
+        { date: "2024-03-25", amount: 1100 },
+        { date: "2024-03-26", amount: 850 },
+        { date: "2024-03-27", amount: 1200 },
+      ],
+      assetBreakdown: [
+        { name: "XLM", value: 8500 },
+        { name: "USDC", value: 3200 },
+        { name: "AQUA", value: 840.5 },
+      ],
+    };
+
+    if (campaignId === "error") {
+      return sendError(res, 404, "Analytics not found for this campaign");
+    }
+
+    res.json(data);
+  });
+
   return app;
 }
 

@@ -32,12 +32,12 @@ export function ProfileCard({
   const hasSocialLinks = email || websiteUrl || twitterHandle || githubHandle;
 
   return (
-    <article className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-7 shadow-xl shadow-black/15">
+    <article className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 sm:p-7 shadow-xl shadow-black/15">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-mint">@{username}</p>
-          <h1 className="mt-3 text-3xl font-semibold text-white">{displayName}</h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-sky/80">{bio}</p>
+          <h1 className="mt-3 text-2xl sm:text-3xl font-semibold text-white">{displayName}</h1>
+          <p className="mt-4 max-w-2xl text-sm sm:text-base leading-relaxed sm:leading-7 text-sky/80">{bio}</p>
 
           {hasSocialLinks && (
             <div className="mt-4 flex flex-wrap gap-3">
@@ -77,7 +77,7 @@ export function ProfileCard({
             </div>
           )}
         </div>
-        <div className="rounded-3xl border border-mint/20 bg-ink/50 px-4 py-3 text-sm text-sky/80">
+        <div className="w-full sm:w-auto mt-4 sm:mt-0 rounded-3xl border border-mint/20 bg-ink/50 px-4 py-3 text-sm text-sky/80">
           <p className="font-semibold text-white">Stellar Wallet</p>
           <p className="mt-2 break-all">{walletAddress}</p>
           <p className={`mt-3 ${isValid ? "text-mint" : "text-gold"}`}>
