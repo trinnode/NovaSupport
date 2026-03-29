@@ -218,8 +218,7 @@ export function createApp() {
     });
 
     if (!profile) {
-      res.status(404).json({ error: "Profile not found" });
-      return;
+      return sendError(res, 404, "Profile not found");
     }
 
     const where = {
@@ -244,8 +243,7 @@ export function createApp() {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.flatten() });
-      return;
+      return res.status(400).json({ error: parsed.error.flatten() });
     }
 
     const supportRecord = await prisma.supportTransaction.create({
