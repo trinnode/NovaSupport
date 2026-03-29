@@ -9,14 +9,16 @@ import {
   TransactionBuilder
 } from "@stellar/stellar-sdk";
 
+import { HORIZON_URL, STELLAR_NETWORK, NETWORK_PASSPHRASE } from "./config";
+import { CONTRACT_ID } from "./config";
+import { contractClient } from "./contract-client";
+
 export const stellarConfig = {
-  horizonUrl:
-    process.env.NEXT_PUBLIC_HORIZON_URL ?? "https://horizon-testnet.stellar.org",
-  stellarNetwork: process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "TESTNET",
-  networkPassphrase:
-    process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-    "Test SDF Network ; September 2015"
+  horizonUrl: HORIZON_URL,
+  stellarNetwork: STELLAR_NETWORK,
+  networkPassphrase: NETWORK_PASSPHRASE
 };
+
 
 export const horizonServer = new Horizon.Server(stellarConfig.horizonUrl);
 
@@ -53,6 +55,27 @@ export async function buildSupportIntent({
   assetIssuer,
   sequence
 }: SupportIntentInput) {
+  // Prefer Soroban contract invocation when a contract ID is configured.
+  if (CONTRACT_ID) {
+    try {
+      const contractXdr = await contractClient.buildSupportTransaction({
+        sourceAccount,
+        destination,
+        amount,
+        memo,
+        assetCode,
+        assetIssuer,
+        sequence,
+      });
+
+      if (contractXdr) return contractXdr;
+    } catch (err) {
+      // If contract client/build fails, fall back to a native payment transaction.
+      // Keep the error local and continue with the payment flow.
+      // eslint-disable-next-line no-console
+      console.warn("contract build failed, falling back to payment intent:", err);
+    }
+  }
   const account = sequence
     ? {
         accountId: () => sourceAccount,

@@ -19,6 +19,10 @@ async function main() {
       displayName: "Stellar Dev Collective",
       bio: "Shipping guides, tools, and experiments that help more builders work on Stellar.",
       walletAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      email: "hello@stellar-dev.example",
+      websiteUrl: "https://stellar-dev.example",
+      twitterHandle: "stellardev",
+      githubHandle: "stellar-dev",
       ownerId: user.id,
       acceptedAssets: {
         create: [

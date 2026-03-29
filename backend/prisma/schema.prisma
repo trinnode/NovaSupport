@@ -23,6 +23,10 @@ model Profile {
   displayName         String
   bio                 String
   avatarUrl           String?
+  email               String?              @unique
+  websiteUrl          String?
+  twitterHandle       String?
+  githubHandle        String?
   walletAddress       String
   ownerId             String
   createdAt           DateTime             @default(now())

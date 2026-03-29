@@ -1,0 +1,16 @@
+#!/bin/sh
+
+echo "Running pre-push checks..."
+
+# Backend tests
+echo "→ Backend: Tests"
+cd backend && npm run test
+TEST_RESULT=$?
+cd ..
+
+if [ $TEST_RESULT -ne 0 ]; then
+  echo "✗ Tests failed. Fix failing tests before pushing."
+  exit 1
+fi
+
+echo "✓ Pre-push checks passed."

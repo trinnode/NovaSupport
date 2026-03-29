@@ -1,10 +1,27 @@
+"use client";
+
+import { useState } from "react";
 import { getNetworkLabel, stellarConfig } from "@/lib/stellar";
+import { WalletConnect } from "./wallet-connect";
 
 type SupportPanelProps = {
   walletAddress: string;
 };
 
 export function SupportPanel({ walletAddress }: SupportPanelProps) {
+  const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
+
+  if (!visitorAddress) {
+    return (
+      <section className="rounded-[2rem] border border-gold/25 bg-gold/10 p-7 text-center">
+        <p className="mb-4 text-sm text-sky/85">
+          Connect your Freighter wallet to support this creator.
+        </p>
+        <WalletConnect onConnect={setVisitorAddress} />
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-[2rem] border border-gold/25 bg-gold/10 p-7">
       <p className="text-xs uppercase tracking-[0.25em] text-gold">Support intent</p>
@@ -31,4 +48,3 @@ export function SupportPanel({ walletAddress }: SupportPanelProps) {
     </section>
   );
 }
-
