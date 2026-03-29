@@ -7,6 +7,33 @@ import { z } from "zod";
 import { StrKey } from "@stellar/stellar-sdk";
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
+import multer from "multer";
+import { createClient } from "@supabase/supabase-js";
+
+const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_FILE_SIZE = 2_097_152;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", file.fieldname));
+    }
+  },
+});
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseClient = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
+
+if (!supabaseClient) {
+  logger.warn("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set — avatar upload endpoint will return 503");
+}
 
 function createRateLimiters() {
   const globalLimiter = rateLimit({
@@ -324,6 +351,70 @@ export function createApp(customLogger?: Logger) {
     }
 
     res.json(data);
+  });
+
+  // ── Avatar upload ──────────────────────────────────────────────────────
+
+  app.post(
+    "/profiles/:username/avatar",
+    writeLimiter,
+    upload.single("avatar"),
+    async (req, res) => {
+      if (!supabaseClient) {
+        return sendError(res, 503, "Avatar upload service unavailable");
+      }
+
+      const bucket = process.env.SUPABASE_AVATAR_BUCKET;
+      if (!bucket) {
+        return sendError(res, 503, "Avatar upload service unavailable");
+      }
+
+      const { username } = req.params;
+
+      const profile = await prisma.profile.findUnique({
+        where: { username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const path = `avatars/${username}`;
+      const { error: uploadError } = await supabaseClient.storage
+        .from(bucket)
+        .upload(path, req.file!.buffer, { upsert: true });
+
+      if (uploadError) {
+        req.log.error({ err: uploadError }, "supabase storage upload failed");
+        return sendError(res, 502, "Avatar storage upload failed");
+      }
+
+      const { data: { publicUrl } } = supabaseClient.storage
+        .from(bucket)
+        .getPublicUrl(path);
+
+      try {
+        const updated = await prisma.profile.update({
+          where: { username },
+          data: { avatarUrl: publicUrl },
+          include: { acceptedAssets: true },
+        });
+        return res.json(updated);
+      } catch (e: unknown) {
+        req.log.error({ err: e }, "database error updating avatarUrl");
+        return sendError(res, 500, "Internal server error");
+      }
+    }
+  );
+
+  // ── Multer error handler ───────────────────────────────────────────────
+
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") return sendError(res, 413, "File too large");
+      return sendError(res, 422, "Invalid file");
+    }
+    next(err);
   });
 
   return app;
