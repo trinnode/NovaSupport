@@ -426,6 +426,46 @@ async function main() {
       assert.equal(response.status, 400);
     });
 
+    // ── Rate Limiting (Requirement 1.1, 2.1, 3.1) ─────────────────────────
+
+    await runTest("GET /health includes RateLimit-Limit and RateLimit-Remaining headers", async () => {
+      const response = await fetch(`${baseUrl}/health`);
+
+      assert.equal(response.status, 200);
+      assert.ok(
+        response.headers.get("ratelimit-limit") !== null,
+        "Expected ratelimit-limit header to be present"
+      );
+      assert.ok(
+        response.headers.get("ratelimit-remaining") !== null,
+        "Expected ratelimit-remaining header to be present"
+      );
+    });
+
+    await runTest("POST /support-transactions includes RateLimit-Limit and RateLimit-Remaining headers", async () => {
+      const response = await fetch(`${baseUrl}/support-transactions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          txHash: `ci-test-${randomUUID()}`,
+          amount: "1.0000000",
+          assetCode: "XLM",
+          recipientAddress: walletAddress,
+          profileId,
+        }),
+      });
+
+      // 201 on success; either way headers should be present
+      assert.ok(
+        response.headers.get("ratelimit-limit") !== null,
+        "Expected ratelimit-limit header to be present"
+      );
+      assert.ok(
+        response.headers.get("ratelimit-remaining") !== null,
+        "Expected ratelimit-remaining header to be present"
+      );
+    });
+
   } finally {
     await stopServer();
   }

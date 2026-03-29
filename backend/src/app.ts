@@ -1,9 +1,30 @@
 import cors from "cors";
 import express, { Response } from "express";
+import { rateLimit } from "express-rate-limit";
 import morgan from "morgan";
 import { z } from "zod";
 import { StrKey } from "@stellar/stellar-sdk";
 import { prisma } from "./db.js";
+
+function createRateLimiters() {
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later." },
+  });
+
+  const writeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later." },
+  });
+
+  return { globalLimiter, writeLimiter };
+}
 
 function sendError(res: Response, status: number, message: string, code?: string) {
   return res.status(status).json({ error: message, ...(code ? { code } : {}) });
@@ -11,6 +32,7 @@ function sendError(res: Response, status: number, message: string, code?: string
 
 export function createApp() {
   const app = express();
+  const { globalLimiter, writeLimiter } = createRateLimiters();
 
   const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
     .split(",")
@@ -28,6 +50,7 @@ export function createApp() {
   }));
   app.use(express.json());
   app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+  app.use(globalLimiter);
 
   // ── Health check with database connectivity ────────────────────────────
 
@@ -114,7 +137,7 @@ export function createApp() {
     })).min(1),
   });
 
-  app.post("/profiles", async (req, res) => {
+  app.post("/profiles", writeLimiter, async (req, res) => {
     const parsed = createProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -161,7 +184,7 @@ export function createApp() {
     githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
   });
 
-  app.patch("/profiles/:username", async (req, res) => {
+  app.patch("/profiles/:username", writeLimiter, async (req, res) => {
     const parsed = updateProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -239,7 +262,7 @@ export function createApp() {
     res.json({ transactions, total, limit, offset });
   });
 
-  app.post("/support-transactions", async (req, res) => {
+  app.post("/support-transactions", writeLimiter, async (req, res) => {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
