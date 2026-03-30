@@ -303,12 +303,18 @@ export function createApp(customLogger?: Logger) {
    *           type: integer
    *           default: 20
    *         description: Number of profiles to return
-   *       - in: query
-   *         name: offset
-   *         schema:
-   *           type: integer
-   *           default: 0
-   *         description: Number of profiles to skip
+  *       - in: query
+  *         name: offset
+  *         schema:
+  *           type: integer
+  *           default: 0
+  *         description: Number of profiles to skip
+  *       - in: query
+  *         name: search
+  *         schema:
+  *           type: string
+  *           maxLength: 100
+  *         description: Optional search term for username or displayName (case-insensitive)
    *     responses:
    *       200:
    *         description: List of profiles
@@ -319,15 +325,27 @@ export function createApp(customLogger?: Logger) {
     try {
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
       const offset = parseInt(req.query.offset as string) || 0;
+      const rawSearch = typeof req.query.search === "string" ? req.query.search : "";
+      const search = rawSearch.trim().slice(0, 100);
+
+      const where = search
+        ? {
+          OR: [
+            { username: { contains: search, mode: "insensitive" as const } },
+            { displayName: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+        : {};
 
       const [profiles, total] = await Promise.all([
         prisma.profile.findMany({
+          where,
           take: limit,
           skip: offset,
           orderBy: { createdAt: "desc" },
           include: { acceptedAssets: true },
         }),
-        prisma.profile.count(),
+        prisma.profile.count({ where }),
       ]);
 
       res.json({ profiles, total, limit, offset });

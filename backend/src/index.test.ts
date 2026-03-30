@@ -151,6 +151,65 @@ async function main() {
       assert.equal(profile.acceptedAssets.length, 2);
     });
 
+    await runTest("GET /profiles supports search across username/displayName with trim and 100-char cap", async () => {
+      const suffix = randomUUID().slice(0, 8);
+      const longNeedle = "a".repeat(100);
+      const longSearch = `   ${longNeedle}tail   `;
+      const usernameMatch = `search-user-${suffix}`;
+
+      const createByUsername = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: usernameMatch,
+          displayName: `Profile ${suffix}`,
+        }),
+      });
+      assert.equal(createByUsername.status, 201);
+
+      const createByDisplayName = await fetch(`${baseUrl}/profiles`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...validProfilePayload,
+          username: `search-long-${suffix}`,
+          displayName: `Needle ${longNeedle}`,
+        }),
+      });
+      assert.equal(createByDisplayName.status, 201);
+
+      const withoutSearchResponse = await fetch(`${baseUrl}/profiles`);
+      assert.equal(withoutSearchResponse.status, 200);
+      const withoutSearch = await withoutSearchResponse.json();
+      assert.ok(Array.isArray(withoutSearch.profiles));
+      assert.ok(
+        withoutSearch.profiles.some((profile: { username: string }) => profile.username === baseUsername),
+        "Expected unfiltered profile list to include seeded profile"
+      );
+
+      const usernameSearchResponse = await fetch(`${baseUrl}/profiles?search=${encodeURIComponent(usernameMatch.toUpperCase())}`);
+      assert.equal(usernameSearchResponse.status, 200);
+      const usernameSearch = await usernameSearchResponse.json();
+      assert.ok(
+        usernameSearch.profiles.some((profile: { username: string }) => profile.username === usernameMatch),
+        "Expected case-insensitive username search to match"
+      );
+
+      const sanitizedSearchResponse = await fetch(`${baseUrl}/profiles?search=${encodeURIComponent(longSearch)}`);
+      assert.equal(sanitizedSearchResponse.status, 200);
+      const sanitizedSearch = await sanitizedSearchResponse.json();
+      assert.ok(
+        sanitizedSearch.profiles.some((profile: { displayName: string }) => profile.displayName === `Needle ${longNeedle}`),
+        "Expected trimmed and 100-char capped search to match displayName"
+      );
+
+      const noMatchResponse = await fetch(`${baseUrl}/profiles?search=${encodeURIComponent("definitely-no-profile-match")}`);
+      assert.equal(noMatchResponse.status, 200);
+      const noMatch = await noMatchResponse.json();
+      assert.equal(noMatch.profiles.length, 0);
+    });
+
     await runTest("creates a support transaction when the payload is valid", async () => {
       const response = await fetch(`${baseUrl}/support-transactions`, {
         method: "POST",
