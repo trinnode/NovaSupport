@@ -91,6 +91,7 @@ async function startServer() {
 
 async function stopServer() {
   if (server.listening) {
+    server.closeAllConnections();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {

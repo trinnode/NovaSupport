@@ -41,9 +41,10 @@ async function startTestServer(logStream: Writable): Promise<TestServer> {
   const { port } = server.address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${port}`;
   const close = () =>
-    new Promise<void>((resolve, reject) =>
-      server.close((err) => (err ? reject(err) : resolve()))
-    );
+    new Promise<void>((resolve, reject) => {
+      server.closeAllConnections();
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
   return { baseUrl, close };
 }
 
