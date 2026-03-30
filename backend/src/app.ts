@@ -5,6 +5,8 @@ import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { StrKey } from "@stellar/stellar-sdk";
+import swaggerJsdoc from 'swagger-jsdoc';
+import swaggerUi from 'swagger-ui-express';
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
 import { generateChallenge, verifySignature, signJWT, requireAuth, isValidStellarAddress, type AuthContext } from "./auth.js";
@@ -73,6 +75,31 @@ export function createApp(customLogger?: Logger) {
   const app = express();
   const { globalLimiter, writeLimiter } = createRateLimiters();
 
+  const swaggerSpec = swaggerJsdoc({
+    definition: {
+      openapi: '3.0.0',
+      info: {
+        title: 'NovaSupport API',
+        version: '1.0.0',
+        description: 'Backend API for NovaSupport — Stellar-native creator support platform',
+      },
+      servers: [{ url: 'http://localhost:4000' }],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+          },
+        },
+      },
+    },
+    apis: ['./src/app.ts'],
+  });
+
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  app.get('/docs.json', (req, res) => res.json(swaggerSpec));
+
   // In-memory challenge store (stateless with signed timestamp)
   const challenges = new Map<string, { challenge: string; timestamp: number }>();
   const CHALLENGE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
@@ -107,6 +134,17 @@ export function createApp(customLogger?: Logger) {
   app.use(pinoHttp({ logger: customLogger ?? logger }));
   app.use(globalLimiter);
 
+  /**
+   * @openapi
+   * /health:
+   *   get:
+   *     summary: Health check with database connectivity
+   *     responses:
+   *       200:
+   *         description: Service is healthy
+   *       503:
+   *         description: Service is unhealthy or database is unreachable
+   */
   // ── Health check with database connectivity ────────────────────────────
 
   app.get("/health", async (req, res) => {
@@ -130,6 +168,29 @@ export function createApp(customLogger?: Logger) {
 
   // ── Authentication ─────────────────────────────────────────────────────
 
+  /**
+   * @openapi
+   * /auth/challenge:
+   *   post:
+   *     summary: Request a challenge nonce for wallet signature
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               walletAddress:
+   *                 type: string
+   *                 description: User's Stellar wallet address
+   *             required:
+   *               - walletAddress
+   *     responses:
+   *       200:
+   *         description: Challenge generated
+   *       400:
+   *         description: Invalid wallet address
+   */
   // Request a challenge nonce for wallet signature
   app.post("/auth/challenge", (req, res) => {
     const { walletAddress } = req.body;
@@ -150,6 +211,35 @@ export function createApp(customLogger?: Logger) {
     signature: z.string(),
   });
 
+  /**
+   * @openapi
+   * /auth/verify:
+   *   post:
+   *     summary: Verify signature and return JWT
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               walletAddress:
+   *                 type: string
+   *                 description: User's Stellar wallet address
+   *               signature:
+   *                 type: string
+   *                 description: Signature of the challenge message
+   *             required:
+   *               - walletAddress
+   *               - signature
+   *     responses:
+   *       200:
+   *         description: Signature verified and JWT returned
+   *       400:
+   *         description: Invalid request or challenge expired
+   *       401:
+   *         description: Invalid signature
+   */
   app.post("/auth/verify", async (req, res) => {
     const parsed = verifySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -201,6 +291,30 @@ export function createApp(customLogger?: Logger) {
 
   // ── List profiles with pagination ──────────────────────────────────────
 
+  /**
+   * @openapi
+   * /profiles:
+   *   get:
+   *     summary: List profiles with pagination
+   *     parameters:
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 20
+   *         description: Number of profiles to return
+   *       - in: query
+   *         name: offset
+   *         schema:
+   *           type: integer
+   *           default: 0
+   *         description: Number of profiles to skip
+   *     responses:
+   *       200:
+   *         description: List of profiles
+   *       500:
+   *         description: Internal server error
+   */
   app.get("/profiles", async (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
@@ -225,6 +339,25 @@ export function createApp(customLogger?: Logger) {
 
   // ── Get profile by username ────────────────────────────────────────────
 
+  /**
+   * @openapi
+   * /profiles/{username}:
+   *   get:
+   *     summary: Get a profile by username
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Profile found
+   *       404:
+   *         description: Profile not found
+   *       500:
+   *         description: Internal server error
+   */
   app.get("/profiles/:username", async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
@@ -266,6 +399,66 @@ export function createApp(customLogger?: Logger) {
     })).min(1),
   });
 
+  /**
+   * @openapi
+   * /profiles:
+   *   post:
+   *     summary: Create a new profile
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               username:
+   *                 type: string
+   *               displayName:
+   *                 type: string
+   *               bio:
+   *                 type: string
+   *               walletAddress:
+   *                 type: string
+   *               email:
+   *                 type: string
+   *                 format: email
+   *               websiteUrl:
+   *                 type: string
+   *                 format: uri
+   *               twitterHandle:
+   *                 type: string
+   *               githubHandle:
+   *                 type: string
+   *               acceptedAssets:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     code:
+   *                       type: string
+   *                     issuer:
+   *                       type: string
+   *                   required:
+   *                     - code
+   *             required:
+   *               - username
+   *               - displayName
+   *               - walletAddress
+   *               - acceptedAssets
+   *     responses:
+   *       201:
+   *         description: Profile created
+   *       400:
+   *         description: Invalid request body or validation failed
+   *       403:
+   *         description: Wallet address does not match authenticated user
+   *       409:
+   *         description: Email or username already taken
+   *       500:
+   *         description: Internal server error
+   */
   app.post("/profiles", requireAuth, writeLimiter, async (req, res) => {
     const parsed = createProfileSchema.safeParse(req.body);
 
@@ -322,6 +515,56 @@ export function createApp(customLogger?: Logger) {
     githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
   });
 
+  /**
+   * @openapi
+   * /profiles/{username}:
+   *   patch:
+   *     summary: Update profile
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               displayName:
+   *                 type: string
+   *               bio:
+   *                 type: string
+   *               avatarUrl:
+   *                 type: string
+   *                 format: uri
+   *               email:
+   *                 type: string
+   *                 format: email
+   *               websiteUrl:
+   *                 type: string
+   *                 format: uri
+   *               twitterHandle:
+   *                 type: string
+   *               githubHandle:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Profile updated
+   *       400:
+   *         description: Invalid request body
+   *       403:
+   *         description: Authenticated user does not own this profile
+   *       404:
+   *         description: Profile not found
+   *       409:
+   *         description: Email already in use
+   *       500:
+   *         description: Internal server error
+   */
   app.patch("/profiles/:username", requireAuth, writeLimiter, async (req, res) => {
     const parsed = updateProfileSchema.safeParse(req.body);
 
@@ -376,6 +619,39 @@ export function createApp(customLogger?: Logger) {
     supporterId: z.string().optional().nullable(),
   });
 
+  /**
+   * @openapi
+   * /profiles/{username}/transactions:
+   *   get:
+   *     summary: Get profile support transactions
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 20
+   *       - in: query
+   *         name: offset
+   *         schema:
+   *           type: integer
+   *           default: 0
+   *       - in: query
+   *         name: network
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: List of transactions
+   *       404:
+   *         description: Profile not found
+   *       500:
+   *         description: Internal server error
+   */
   app.get("/profiles/:username/transactions", async (req, res) => {
     const { username } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
@@ -408,6 +684,58 @@ export function createApp(customLogger?: Logger) {
     res.json({ transactions, total, limit, offset });
   });
 
+  /**
+   * @openapi
+   * /support-transactions:
+   *   post:
+   *     summary: Record a support transaction
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               txHash:
+   *                 type: string
+   *               amount:
+   *                 type: string
+   *               assetCode:
+   *                 type: string
+   *               assetIssuer:
+   *                 type: string
+   *               status:
+   *                 type: string
+   *                 default: pending
+   *               message:
+   *                 type: string
+   *               stellarNetwork:
+   *                 type: string
+   *                 default: TESTNET
+   *               supporterAddress:
+   *                 type: string
+   *               recipientAddress:
+   *                 type: string
+   *               profileId:
+   *                 type: string
+   *               supporterId:
+   *                 type: string
+   *             required:
+   *               - txHash
+   *               - amount
+   *               - assetCode
+   *               - recipientAddress
+   *               - profileId
+   *     responses:
+   *       201:
+   *         description: Support transaction recorded
+   *       400:
+   *         description: Invalid request body
+   *       500:
+   *         description: Internal server error
+   */
   app.post("/support-transactions", requireAuth, writeLimiter, async (req, res) => {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
@@ -427,6 +755,23 @@ export function createApp(customLogger?: Logger) {
 
   // ── Analytics ──────────────────────────────────────────────────────────
 
+  /**
+   * @openapi
+   * /analytics/{campaignId}:
+   *   get:
+   *     summary: Get profile analytics
+   *     parameters:
+   *       - in: path
+   *         name: campaignId
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Analytics data
+   *       404:
+   *         description: Analytics not found
+   */
   app.get("/analytics/:campaignId", async (req, res) => {
     // Mock analytics logic (future: fetch optimized views from DB)
     const { campaignId } = req.params;
@@ -463,6 +808,40 @@ export function createApp(customLogger?: Logger) {
 
   // ── Avatar upload ──────────────────────────────────────────────────────
 
+  /**
+   * @openapi
+   * /profiles/{username}/avatar:
+   *   post:
+   *     summary: Update profile avatar
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       content:
+   *         multipart/form-data:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               avatar:
+   *                 type: string
+   *                 format: binary
+   *     responses:
+   *       200:
+   *         description: Avatar updated
+   *       404:
+   *         description: Profile not found
+   *       413:
+   *         description: File too large
+   *       422:
+   *         description: Invalid file
+   *       502:
+   *         description: Avatar storage upload failed
+   *       503:
+   *         description: Avatar upload service unavailable
+   */
   app.post(
     "/profiles/:username/avatar",
     writeLimiter,
