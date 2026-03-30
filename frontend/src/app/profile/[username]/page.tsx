@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { AppShell } from "@/components/app-shell";
 import { ProfileCard } from "@/components/profile-card";
 import { SupportPanel } from "@/components/support-panel";
@@ -16,6 +17,7 @@ type Profile = {
   displayName: string;
   bio: string;
   walletAddress: string;
+  avatarUrl?: string | null;
   acceptedAssets: Array<{ code: string; issuer?: string | null }>;
 };
 
@@ -43,6 +45,38 @@ async function getProfile(username: string): Promise<Profile> {
   }
 
   return res.json();
+}
+
+export async function generateMetadata(
+  { params }: { params: { username: string } }
+): Promise<Metadata> {
+  const res = await fetch(`${API_BASE_URL}/profiles/${params.username}`);
+
+  if (!res.ok) {
+    return {
+      title: 'Profile not found — NovaSupport',
+    };
+  }
+
+  const profile: Profile = await res.json();
+
+  return {
+    title: `${profile.displayName} (@${profile.username}) — NovaSupport`,
+    description: profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
+    openGraph: {
+      title: `${profile.displayName} — NovaSupport`,
+      description: profile.bio ?? `Support ${profile.displayName} on the Stellar network`,
+      images: profile.avatarUrl ? [{ url: profile.avatarUrl }] : [],
+      url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/profile/${profile.username}`,
+      type: 'profile',
+    },
+    twitter: {
+      card: 'summary',
+      title: `${profile.displayName} — NovaSupport`,
+      description: profile.bio ?? `Support ${profile.displayName} on the Stellar network`,
+      images: profile.avatarUrl ? [profile.avatarUrl] : [],
+    },
+  };
 }
 
 async function getTransactions(username: string, limit = 10): Promise<SupportTx[]> {
