@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_BASE_URL } from "@/lib/config";
 import { AppShell } from "@/components/app-shell";
+import { useToast } from "@/lib/use-toast";
+import { Toast } from "@/components/toast";
 
 interface FormData {
   username: string;
@@ -30,6 +32,7 @@ const CONSTRAINTS = [
 
 export default function CreatePage() {
   const router = useRouter();
+  const { toast, showToast, dismiss } = useToast();
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>({
@@ -125,6 +128,7 @@ export default function CreatePage() {
     }
 
     if (!walletValid) {
+      showToast("Please enter a valid Stellar address.", "error");
       setError("Wallet address must be a valid Stellar public key starting with G.");
       return;
     }
@@ -148,13 +152,21 @@ export default function CreatePage() {
         body: JSON.stringify(payload),
       });
 
-      if (res.status === 409) setError("Username already taken.");
-      else if (!res.ok) setError("Something went wrong. Please try again.");
-      else {
+      if (res.status === 409) {
+        showToast("That username is already taken.", "error");
+        setError("Username already taken.");
+      } else if (!res.ok) {
+        showToast("Something went wrong. Please try again.", "error");
+        setError("Something went wrong. Please try again.");
+      } else {
         const profile = await res.json();
-        router.push(`/profile/${profile.username}`);
+        showToast("Profile created!", "success");
+        setTimeout(() => {
+          router.push(`/profile/${profile.username}`);
+        }, 2000);
       }
     } catch {
+      showToast("Something went wrong. Please try again.", "error");
       setError("Network error — please check your connection.");
     } finally {
       setLoading(false);
@@ -493,6 +505,13 @@ export default function CreatePage() {
           </div>
         </aside>
       </section>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onDismiss={dismiss}
+        />
+      )}
     </AppShell>
   );
 }
