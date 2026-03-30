@@ -369,6 +369,81 @@ async function main() {
     });
   }
 
+  // Test 9: GET /analytics/:campaignId → returns real analytics data
+  if (!hasDb) {
+    console.log("SKIP GET /analytics/:campaignId → returns real analytics data (no DATABASE_URL)");
+  } else {
+    await runTest("GET /analytics/:campaignId → returns real analytics data", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let ownerId: string | undefined;
+      let profileId: string | undefined;
+      let username: string | undefined;
+      const txHash = randomUUID().replace(/-/g, "");
+
+      try {
+        ownerId = await seedUser();
+        const profile = await prisma.profile.create({
+          data: {
+            username: `analytics-test-${randomUUID().slice(0, 8)}`,
+            displayName: "Analytics Test",
+            bio: "",
+            walletAddress,
+            ownerId,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        profileId = profile.id;
+        username = profile.username;
+
+        // Seed a successful transaction
+        await prisma.supportTransaction.create({
+          data: {
+            txHash,
+            amount: 100,
+            assetCode: "XLM",
+            status: "SUCCESS",
+            stellarNetwork: "testnet",
+            recipientAddress: walletAddress,
+            profileId,
+            supporterAddress: "GBSX...TEST",
+          },
+        });
+
+        const res = await fetch(`${srv.baseUrl}/analytics/${username}`);
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+
+        const body = (await res.json()) as any;
+        assert.equal(body.profile.username, username);
+        assert.equal(body.summary.totalRaised, 100);
+        assert.equal(body.summary.totalContributors, 1);
+        assert.equal(body.transactionTotal, 1);
+        assert.ok(Array.isArray(body.dailyContributions));
+        assert.ok(Array.isArray(body.assetBreakdown));
+        assert.equal(body.assetBreakdown[0].name, "XLM");
+        assert.equal(body.assetBreakdown[0].value, 100);
+      } finally {
+        await srv.close();
+        if (profileId) {
+          await prisma.supportTransaction.deleteMany({ where: { profileId } });
+          await prisma.acceptedAsset.deleteMany({ where: { profileId } });
+          await prisma.profile.deleteMany({ where: { id: profileId } });
+        }
+        if (ownerId) await prisma.user.deleteMany({ where: { id: ownerId } });
+      }
+    });
+  }
+
+  // Test 10: GET /analytics/:campaignId → 404 if profile not found
+  await runTest("GET /analytics/:campaignId → 404 if profile not found", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/analytics/non-existent-user`);
+      assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
   if (hasDb) await prisma.$disconnect();
 }
 

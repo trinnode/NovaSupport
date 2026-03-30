@@ -956,54 +956,83 @@ export function createApp(customLogger?: Logger) {
     const offset = parseInt(req.query.offset as string) || 0;
 
     // Attempt to find a profile by username (campaignId maps to username)
-    const profile = await prisma.profile.findUnique({ where: { username: campaignId } });
+    const profile = await prisma.profile.findUnique({
+      where: { username: campaignId },
+      include: { acceptedAssets: true },
+    });
 
     if (!profile) {
-      return sendError(res, 404, "Analytics not found for this campaign");
+      return sendError(res, 404, "Profile not found");
     }
 
-    // Mocked analytics summary/data (future: replace with real analytics queries)
-    const summary = {
-      totalRaised: 12540.5,
-      totalContributors: 142,
-      avgContribution: 88.3,
-      activeDrips: 12,
-    };
+    const transactions = await prisma.supportTransaction.findMany({
+      where: { profileId: profile.id, status: "SUCCESS" },
+      orderBy: { createdAt: "desc" },
+    });
 
-    const dailyContributions = [
-      { date: "2024-03-21", amount: 450 },
-      { date: "2024-03-22", amount: 620 },
-      { date: "2024-03-23", amount: 380 },
-      { date: "2024-03-24", amount: 940 },
-      { date: "2024-03-25", amount: 1100 },
-      { date: "2024-03-26", amount: 850 },
-      { date: "2024-03-27", amount: 1200 },
-    ];
+    const totalAmount = transactions.reduce(
+      (sum, tx) => sum + Number(tx.amount),
+      0
+    );
+    const uniqueSupporters = new Set(
+      transactions.map((tx) => tx.supporterAddress)
+    ).size;
 
-    const assetBreakdown = [
-      { name: "XLM", value: 8500 },
-      { name: "USDC", value: 3200 },
-      { name: "AQUA", value: 840.5 },
-    ];
+    // Calculate daily contributions for last 7 days
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().split("T")[0];
+    });
 
-    const where = { profileId: profile.id, status: "SUCCESS" };
+    const dailyMap = new Map<string, number>();
+    last7Days.forEach((date) => dailyMap.set(date, 0));
 
-    const [recentTransactions, transactionTotal] = await Promise.all([
-      prisma.supportTransaction.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.supportTransaction.count({ where }),
-    ]);
+    transactions.forEach((tx) => {
+      const date = tx.createdAt.toISOString().split("T")[0];
+      if (dailyMap.has(date)) {
+        dailyMap.set(date, (dailyMap.get(date) || 0) + Number(tx.amount));
+      }
+    });
+
+    const dailyContributions = Array.from(dailyMap.entries()).map(
+      ([date, amount]) => ({
+        date,
+        amount: Number(amount.toFixed(7)),
+      })
+    );
+
+    // Calculate asset breakdown
+    const assetMap = new Map<string, number>();
+    transactions.forEach((tx) => {
+      assetMap.set(
+        tx.assetCode,
+        (assetMap.get(tx.assetCode) || 0) + Number(tx.amount)
+      );
+    });
+
+    const assetBreakdown = Array.from(assetMap.entries()).map(
+      ([name, value]) => ({
+        name,
+        value: Number(value.toFixed(7)),
+      })
+    );
+
+    const avgContribution =
+      transactions.length > 0 ? totalAmount / transactions.length : 0;
 
     res.json({
-      summary,
+      profile: { username: profile.username, displayName: profile.displayName },
+      summary: {
+        totalRaised: Number(totalAmount.toFixed(7)),
+        totalContributors: uniqueSupporters,
+        avgContribution: Number(avgContribution.toFixed(7)),
+        activeDrips: 0, // Not yet implemented in schema
+      },
       dailyContributions,
       assetBreakdown,
-      recentTransactions,
-      transactionTotal,
+      recentTransactions: transactions.slice(offset, offset + limit),
+      transactionTotal: transactions.length,
     });
   });
 
