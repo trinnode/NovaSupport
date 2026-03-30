@@ -121,10 +121,11 @@ export function ProfileTabs({ username }: { username: string }) {
                 </table>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02] py-20 text-center">
-                <Clock className="mb-4 text-steel/30" size={48} />
-                <p className="text-steel">No transactions found yet.</p>
-                <p className="text-xs text-steel/50">Be the first to support this campaign!</p>
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <p className="text-gray-500 font-medium">No support yet</p>
+                <p className="text-sm text-gray-400 mt-1">
+                  Be the first to support {username}!
+                </p>
               </div>
             )}
           </motion.div>
