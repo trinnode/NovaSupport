@@ -603,6 +603,100 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
+  // ── Update accepted assets ────────────────────────────────────────────
+
+  const updateAssetsSchema = z.object({
+    assets: z.array(z.object({
+      code: z.string().regex(/^[A-Z]{1,12}$/),
+      issuer: z.string().optional(),
+    })).min(1),
+  });
+
+  /**
+   * @openapi
+   * /profiles/{username}/assets:
+   *   patch:
+   *     summary: Replace accepted assets for a profile
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: username
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               assets:
+   *                 type: array
+   *                 minItems: 1
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     code:
+   *                       type: string
+   *                     issuer:
+   *                       type: string
+   *                   required:
+   *                     - code
+   *             required:
+   *               - assets
+   *     responses:
+   *       200:
+   *         description: Assets replaced, updated profile returned
+   *       403:
+   *         description: Authenticated user does not own this profile
+   *       404:
+   *         description: Profile not found
+   *       422:
+   *         description: Empty array or invalid asset code
+   *       500:
+   *         description: Internal server error
+   */
+  app.patch("/profiles/:username/assets", requireAuth, writeLimiter, async (req, res) => {
+    const parsed = updateAssetsSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.flatten() }, "validation failed");
+      return sendError(res, 422, "Invalid assets");
+    }
+
+    const username = req.params.username as string;
+    const profile = await prisma.profile.findUnique({ where: { username } });
+
+    if (!profile) {
+      return sendError(res, 404, "Profile not found");
+    }
+
+    if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      return sendError(res, 403, "Forbidden: You do not own this profile");
+    }
+
+    try {
+      await prisma.$transaction([
+        prisma.acceptedAsset.deleteMany({ where: { profileId: profile.id } }),
+        prisma.acceptedAsset.createMany({
+          data: parsed.data.assets.map((a) => ({ ...a, profileId: profile.id })),
+        }),
+      ]);
+
+      const updated = await prisma.profile.findUnique({
+        where: { username },
+        include: { acceptedAssets: true },
+      });
+
+      return res.json(updated);
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "database error updating assets");
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
   // ── Support transactions ───────────────────────────────────────────────
 
   const supportPayloadSchema = z.object({

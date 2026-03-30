@@ -273,6 +273,102 @@ async function main() {
     });
   }
 
+  // Test 5: PATCH /profiles/:username/assets → replaces assets and returns updated profile
+  if (!hasDb) {
+    console.log("SKIP PATCH /profiles/:username/assets → replaces assets (no DATABASE_URL)");
+  } else {
+    await runTest("PATCH /profiles/:username/assets → replaces assets and returns updated profile", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      let ownerId: string | undefined;
+      let username: string | undefined;
+      try {
+        ownerId = await seedUser();
+        const profile = await prisma.profile.create({
+          data: {
+            username: `asset-test-${randomUUID().slice(0, 8)}`,
+            displayName: "Asset Test",
+            bio: "",
+            walletAddress,
+            ownerId,
+            acceptedAssets: { create: [{ code: "XLM" }] },
+          },
+        });
+        username = profile.username;
+
+        const res = await fetch(`${srv.baseUrl}/profiles/${username}/assets`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            assets: [
+              { code: "USDC", issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" },
+            ],
+          }),
+        });
+
+        assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+        const body = await res.json() as { acceptedAssets: { code: string }[] };
+        assert.equal(body.acceptedAssets.length, 1);
+        assert.equal(body.acceptedAssets[0].code, "USDC");
+      } finally {
+        await srv.close();
+        if (username) {
+          await prisma.acceptedAsset.deleteMany({ where: { profile: { username } } });
+          await prisma.profile.deleteMany({ where: { username } });
+        }
+        if (ownerId) await prisma.user.deleteMany({ where: { id: ownerId } });
+      }
+    });
+  }
+
+  // Test 6: PATCH /profiles/:username/assets → empty array returns 422
+  await runTest("PATCH /profiles/:username/assets → empty array returns 422", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/profiles/any-user/assets`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assets: [] }),
+      });
+      assert.equal(res.status, 422, `Expected 422, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 7: PATCH /profiles/:username/assets → invalid asset code returns 422
+  await runTest("PATCH /profiles/:username/assets → invalid asset code returns 422", async () => {
+    const srv = await startTestServer(makeLogStream().stream);
+    try {
+      const res = await fetch(`${srv.baseUrl}/profiles/any-user/assets`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assets: [{ code: "invalid-code!" }] }),
+      });
+      assert.equal(res.status, 422, `Expected 422, got ${res.status}`);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // Test 8: PATCH /profiles/:username/assets → unknown profile returns 404
+  if (!hasDb) {
+    console.log("SKIP PATCH /profiles/:username/assets → unknown profile returns 404 (no DATABASE_URL)");
+  } else {
+    await runTest("PATCH /profiles/:username/assets → unknown profile returns 404", async () => {
+      const srv = await startTestServer(makeLogStream().stream);
+      try {
+        const res = await fetch(`${srv.baseUrl}/profiles/no-such-user-xyz/assets`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assets: [{ code: "XLM" }] }),
+        });
+        assert.equal(res.status, 404, `Expected 404, got ${res.status}`);
+      } finally {
+        await srv.close();
+      }
+    });
+  }
+
   if (hasDb) await prisma.$disconnect();
 }
 
