@@ -773,37 +773,62 @@ export function createApp(customLogger?: Logger) {
    *         description: Analytics not found
    */
   app.get("/analytics/:campaignId", async (req, res) => {
-    // Mock analytics logic (future: fetch optimized views from DB)
+    // Analytics endpoint — returns summary + recent transactions with pagination
     const { campaignId } = req.params;
 
-    const data = {
-      summary: {
-        totalRaised: 12540.5,
-        totalContributors: 142,
-        avgContribution: 88.3,
-        activeDrips: 12,
-      },
-      dailyContributions: [
-        { date: "2024-03-21", amount: 450 },
-        { date: "2024-03-22", amount: 620 },
-        { date: "2024-03-23", amount: 380 },
-        { date: "2024-03-24", amount: 940 },
-        { date: "2024-03-25", amount: 1100 },
-        { date: "2024-03-26", amount: 850 },
-        { date: "2024-03-27", amount: 1200 },
-      ],
-      assetBreakdown: [
-        { name: "XLM", value: 8500 },
-        { name: "USDC", value: 3200 },
-        { name: "AQUA", value: 840.5 },
-      ],
-    };
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const offset = parseInt(req.query.offset as string) || 0;
 
-    if (campaignId === "error") {
+    // Attempt to find a profile by username (campaignId maps to username)
+    const profile = await prisma.profile.findUnique({ where: { username: campaignId } });
+
+    if (!profile) {
       return sendError(res, 404, "Analytics not found for this campaign");
     }
 
-    res.json(data);
+    // Mocked analytics summary/data (future: replace with real analytics queries)
+    const summary = {
+      totalRaised: 12540.5,
+      totalContributors: 142,
+      avgContribution: 88.3,
+      activeDrips: 12,
+    };
+
+    const dailyContributions = [
+      { date: "2024-03-21", amount: 450 },
+      { date: "2024-03-22", amount: 620 },
+      { date: "2024-03-23", amount: 380 },
+      { date: "2024-03-24", amount: 940 },
+      { date: "2024-03-25", amount: 1100 },
+      { date: "2024-03-26", amount: 850 },
+      { date: "2024-03-27", amount: 1200 },
+    ];
+
+    const assetBreakdown = [
+      { name: "XLM", value: 8500 },
+      { name: "USDC", value: 3200 },
+      { name: "AQUA", value: 840.5 },
+    ];
+
+    const where = { profileId: profile.id, status: "SUCCESS" };
+
+    const [recentTransactions, transactionTotal] = await Promise.all([
+      prisma.supportTransaction.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.supportTransaction.count({ where }),
+    ]);
+
+    res.json({
+      summary,
+      dailyContributions,
+      assetBreakdown,
+      recentTransactions,
+      transactionTotal,
+    });
   });
 
   // ── Avatar upload ──────────────────────────────────────────────────────
