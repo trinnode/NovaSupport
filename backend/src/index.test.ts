@@ -152,6 +152,77 @@ async function main() {
       assert.equal(profile.acceptedAssets.length, 2);
     });
 
+    await runTest("returns profile stats summary using only SUCCESS transactions", async () => {
+      const supporterOne = `G${"B".repeat(55)}`;
+      const supporterTwo = `G${"C".repeat(55)}`;
+      const ignoredSupporter = `G${"D".repeat(55)}`;
+
+      await prisma.supportTransaction.createMany({
+        data: [
+          {
+            txHash: `ci-test-${randomUUID()}`,
+            amount: "10.5000000",
+            assetCode: "XLM",
+            status: "SUCCESS",
+            stellarNetwork: "TESTNET",
+            supporterAddress: supporterOne,
+            recipientAddress: walletAddress,
+            profileId,
+          },
+          {
+            txHash: `ci-test-${randomUUID()}`,
+            amount: "5.0000000",
+            assetCode: "XLM",
+            status: "SUCCESS",
+            stellarNetwork: "TESTNET",
+            supporterAddress: supporterTwo,
+            recipientAddress: walletAddress,
+            profileId,
+          },
+          {
+            txHash: `ci-test-${randomUUID()}`,
+            amount: "2.2500000",
+            assetCode: "USDC",
+            status: "SUCCESS",
+            stellarNetwork: "TESTNET",
+            supporterAddress: supporterOne,
+            recipientAddress: walletAddress,
+            profileId,
+          },
+          {
+            txHash: `ci-test-${randomUUID()}`,
+            amount: "99.0000000",
+            assetCode: "XLM",
+            status: "pending",
+            stellarNetwork: "TESTNET",
+            supporterAddress: ignoredSupporter,
+            recipientAddress: walletAddress,
+            profileId,
+          },
+        ],
+      });
+
+      const response = await fetch(`${baseUrl}/profiles/${baseUsername}/stats`);
+
+      assert.equal(response.status, 200);
+
+      const body = await response.json();
+      assert.deepEqual(body, {
+        totalTransactions: 3,
+        uniqueSupporters: 2,
+        totalAmountXLM: "15.5000000",
+      });
+    });
+
+    await runTest("returns 404 for stats of unknown profile", async () => {
+      const response = await fetch(`${baseUrl}/profiles/nonexistent-user/stats`);
+
+      assert.equal(response.status, 404);
+
+      const body = await response.json();
+      assert.equal(body.error, "Profile not found");
+    });
+
     await runTest("GET /profiles supports search across username/displayName with trim and 100-char cap", async () => {
       const suffix = randomUUID().slice(0, 8);
       const displayNameNeedle = `Needle ${suffix}`;
