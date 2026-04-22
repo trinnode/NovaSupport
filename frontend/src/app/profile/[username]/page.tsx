@@ -107,6 +107,7 @@ export default async function ProfilePage({ params }: PageProps) {
             bio={profile.bio}
             walletAddress={profile.walletAddress}
             acceptedAssets={profile.acceptedAssets}
+            avatarUrl={profile.avatarUrl || undefined}
           />
           
           <div className="px-2">
