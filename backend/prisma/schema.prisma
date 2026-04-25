@@ -24,9 +24,12 @@ model Profile {
   displayName         String
   bio                 String
   avatarUrl           String?
-  email               String?              @unique
-  notifyOnSupport     Boolean              @default(true)
-  websiteUrl          String?
+  email                     String?              @unique
+  emailVerified             Boolean              @default(false)
+  emailVerificationToken    String?              @unique
+  emailVerificationExpiry   DateTime?
+  notifyOnSupport           Boolean              @default(true)
+  websiteUrl                String?
   twitterHandle       String?
   githubHandle        String?
   walletAddress       String

@@ -22,6 +22,7 @@ import {
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
 import { sendSupportReceivedEmail } from "./services/email.js";
+import { sendVerificationEmail } from "./emails/verify-email.js";
 import { createHmac } from "crypto";
 import { sanitizeBody, sanitizeQuery } from "./middleware/sanitize.js";
 
@@ -82,7 +83,17 @@ function createRateLimiters() {
     message: { error: "Too many requests, please try again later." },
   });
 
-  return { globalLimiter, writeLimiter };
+  // Stricter limiter for profile creation: 3 per hour per IP (#276)
+  const profileCreationLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip ?? "unknown",
+    message: { error: "Too many profiles created from this IP address. Please try again in an hour.", code: "RATE_LIMIT_EXCEEDED" },
+  });
+
+  return { globalLimiter, writeLimiter, profileCreationLimiter };
 }
 
 function sendError(
@@ -96,7 +107,7 @@ function sendError(
 
 export function createApp(customLogger?: Logger) {
   const app = express();
-  const { globalLimiter, writeLimiter } = createRateLimiters();
+  const { globalLimiter, writeLimiter, profileCreationLimiter } = createRateLimiters();
 
   const swaggerSpec = swaggerJsdoc({
     definition: {
@@ -725,7 +736,7 @@ export function createApp(customLogger?: Logger) {
    *       500:
    *         description: Internal server error
    */
-  app.post("/profiles", requireAuth, writeLimiter, async (req, res) => {
+  app.post("/profiles", requireAuth, profileCreationLimiter, writeLimiter, async (req, res) => {
     const parsed = createProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -755,6 +766,9 @@ export function createApp(customLogger?: Logger) {
     }
 
     try {
+      const emailVerificationToken = email ? randomBytes(32).toString("hex") : undefined;
+      const emailVerificationExpiry = email ? new Date(Date.now() + 24 * 60 * 60 * 1000) : undefined;
+
       const profile = await prisma.profile.create({
         data: {
           username,
@@ -762,6 +776,9 @@ export function createApp(customLogger?: Logger) {
           bio,
           walletAddress,
           email,
+          emailVerified: false,
+          emailVerificationToken,
+          emailVerificationExpiry,
           websiteUrl,
           twitterHandle,
           githubHandle,
@@ -770,6 +787,13 @@ export function createApp(customLogger?: Logger) {
         },
         include: { acceptedAssets: true },
       });
+
+      if (email && emailVerificationToken) {
+        sendVerificationEmail(email, username, emailVerificationToken).catch((err) =>
+          req.log.warn({ err }, "Failed to send verification email"),
+        );
+      }
+
       req.log.info({ username: profile.username }, "profile created");
       return res.status(201).json(profile);
     } catch (e: unknown) {
@@ -893,11 +917,37 @@ export function createApp(customLogger?: Logger) {
       }
 
       try {
+        const emailChanged =
+          parsed.data.email !== undefined && parsed.data.email !== profile.email;
+        const newEmail = parsed.data.email;
+        const emailVerificationToken =
+          emailChanged && newEmail ? randomBytes(32).toString("hex") : undefined;
+        const emailVerificationExpiry =
+          emailChanged && newEmail
+            ? new Date(Date.now() + 24 * 60 * 60 * 1000)
+            : undefined;
+
         const updated = await prisma.profile.update({
           where: { username },
-          data: parsed.data,
+          data: {
+            ...parsed.data,
+            ...(emailChanged
+              ? {
+                  emailVerified: false,
+                  emailVerificationToken,
+                  emailVerificationExpiry,
+                }
+              : {}),
+          },
           include: { acceptedAssets: true },
         });
+
+        if (emailChanged && newEmail && emailVerificationToken) {
+          sendVerificationEmail(newEmail, username, emailVerificationToken).catch((err) =>
+            req.log.warn({ err }, "Failed to send verification email on update"),
+          );
+        }
+
         return res.json(updated);
       } catch (e: unknown) {
         if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
@@ -908,6 +958,44 @@ export function createApp(customLogger?: Logger) {
       }
     },
   );
+
+  // ── Email verification (#275) ─────────────────────────────────────────
+
+  app.post("/profiles/:username/verify-email", async (req, res) => {
+    const { token } = req.body as { token?: unknown };
+
+    if (!token || typeof token !== "string") {
+      return sendError(res, 400, "Verification token is required");
+    }
+
+    try {
+      const profile = await prisma.profile.findFirst({
+        where: { username: req.params.username, emailVerificationToken: token },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Invalid or expired verification token", "TOKEN_INVALID");
+      }
+
+      if (profile.emailVerificationExpiry && profile.emailVerificationExpiry < new Date()) {
+        return sendError(res, 410, "Verification token has expired", "TOKEN_EXPIRED");
+      }
+
+      await prisma.profile.update({
+        where: { id: profile.id },
+        data: {
+          emailVerified: true,
+          emailVerificationToken: null,
+          emailVerificationExpiry: null,
+        },
+      });
+
+      return res.json({ ok: true, message: "Email verified successfully" });
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "error during email verification");
+      return sendError(res, 500, "Internal server error");
+    }
+  });
 
   // ── Update accepted assets ────────────────────────────────────────────
 
@@ -1094,6 +1182,8 @@ export function createApp(customLogger?: Logger) {
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 1000);
     const offset = parseInt(req.query.offset as string) || 0;
     const network = req.query.network as string | undefined;
+    const status = req.query.status as string | undefined;
+    const assetCode = req.query.assetCode as string | undefined;
 
     const profile = await prisma.profile.findUnique({
       where: { username },
@@ -1106,6 +1196,8 @@ export function createApp(customLogger?: Logger) {
     const where = {
       recipientAddress: profile.walletAddress,
       ...(network ? { stellarNetwork: network } : {}),
+      ...(status ? { status } : {}),
+      ...(assetCode ? { assetCode } : {}),
     };
 
     const [transactions, total] = await Promise.all([
@@ -1219,7 +1311,7 @@ export function createApp(customLogger?: Logger) {
     if (!profile) return;
 
     const webhook = await prisma.webhook.findFirst({
-      where: { id: req.params.id, profileId: profile.id },
+      where: { id: req.params.id as string, profileId: profile.id },
     });
     if (!webhook) return sendError(res, 404, "Webhook not found");
 
@@ -1443,26 +1535,41 @@ export function createApp(customLogger?: Logger) {
               .update(payload)
               .digest("hex");
 
-            fetch(webhook.url, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-NovaSupport-Signature": signature,
-              },
-              body: payload,
-            })
-              .then((res) => {
-                logger.info(
-                  { webhookId: webhook.id, profileId: supportRecord.profileId, status: res.status },
-                  "webhook delivered",
-                );
-              })
-              .catch((err) => {
-                logger.error(
-                  { webhookId: webhook.id, profileId: supportRecord.profileId, err },
-                  "webhook delivery failed",
-                );
-              });
+            // Deliver with up to 3 attempts and exponential backoff (#278)
+            (async () => {
+              for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                  const response = await fetch(webhook.url, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-NovaSupport-Signature": signature,
+                    },
+                    body: payload,
+                    signal: AbortSignal.timeout(10_000),
+                  });
+                  logger.info(
+                    { webhookId: webhook.id, profileId: supportRecord.profileId, status: response.status, attempt },
+                    "webhook delivered",
+                  );
+                  break; // success — stop retrying
+                } catch (err) {
+                  if (attempt < 3) {
+                    const delayMs = 1000 * 2 ** (attempt - 1); // 1s, 2s
+                    logger.warn(
+                      { webhookId: webhook.id, attempt, delayMs, err },
+                      "webhook delivery failed, retrying",
+                    );
+                    await new Promise((r) => setTimeout(r, delayMs));
+                  } else {
+                    logger.error(
+                      { webhookId: webhook.id, profileId: supportRecord.profileId, err },
+                      "webhook delivery failed after 3 attempts",
+                    );
+                  }
+                }
+              }
+            })();
           }
         } catch (err) {
           logger.error(
@@ -1931,11 +2038,11 @@ export function createApp(customLogger?: Logger) {
     const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
     if (!user) return sendError(res, 401, "User not found");
 
-    const subscription = await prisma.recurringSupport.findUnique({ where: { id } });
+    const subscription = await prisma.recurringSupport.findUnique({ where: { id: id as string } });
     if (!subscription) return sendError(res, 404, "Recurring support not found");
     if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
 
-    const updated = await prisma.recurringSupport.update({ where: { id }, data: { status } });
+    const updated = await prisma.recurringSupport.update({ where: { id: id as string }, data: { status } });
 
     return res.json(updated);
   });
