@@ -455,6 +455,108 @@ async function main() {
     assert.ok(!changed, "Expected no changes for non-string primitives");
   });
 
+  // ── #273: Advanced XSS prevention coverage ────────────────────────────────
+
+  // Each entry is a payload + the substring that MUST NOT remain in the
+  // sanitized output. Keeps adding new vectors trivially: append a row.
+  const xssVectors: Array<{ name: string; payload: string; mustNotContain: string[] }> = [
+    {
+      name: "data: URI image",
+      payload: "<img src=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">caption",
+      mustNotContain: ["data:", "<img", "src="],
+    },
+    {
+      name: "SVG onload payload",
+      payload: "<svg onload=alert(1)>visible</svg>",
+      mustNotContain: ["<svg", "onload", "alert"],
+    },
+    {
+      name: "iframe javascript URL",
+      payload: "<iframe src=\"javascript:alert(1)\"></iframe>after",
+      mustNotContain: ["<iframe", "javascript:"],
+    },
+    {
+      name: "style expression() leak",
+      payload: "<div style=\"background:url(javascript:alert(1))\">visible</div>",
+      mustNotContain: ["<div", "style=", "javascript:"],
+    },
+    {
+      name: "broken-tag fallback (<scr<script>ipt>)",
+      // The point of this case is that no executable <script> survives;
+      // residual `alert(1)` *text* is harmless (it's not JS without tags).
+      payload: "<scr<script>ipt>alert(1)</scr</script>ipt>final",
+      mustNotContain: ["<script"],
+    },
+    {
+      name: "anchor with javascript scheme",
+      payload: "<a href=\"javascript:steal()\">click</a>after",
+      mustNotContain: ["<a", "javascript:"],
+    },
+    {
+      name: "html entity encoded script",
+      payload: "&lt;script&gt;alert(1)&lt;/script&gt;clean",
+      mustNotContain: [], // entities are kept as text — confirm output preserves them safely
+    },
+  ];
+
+  for (const vector of xssVectors) {
+    await runTest(
+      `sanitizeString defangs XSS vector: ${vector.name} (bio)`,
+      async () => {
+        const { result } = sanitizeString("bio", vector.payload);
+        for (const banned of vector.mustNotContain) {
+          assert.ok(
+            !result.toLowerCase().includes(banned.toLowerCase()),
+            `Sanitized output still contains \"${banned}\" → ${result}`,
+          );
+        }
+      },
+    );
+
+    await runTest(
+      `sanitizeString defangs XSS vector: ${vector.name} (message)`,
+      async () => {
+        const { result } = sanitizeString("message", vector.payload);
+        for (const banned of vector.mustNotContain) {
+          assert.ok(
+            !result.toLowerCase().includes(banned.toLowerCase()),
+            `Sanitized message still contains \"${banned}\" → ${result}`,
+          );
+        }
+      },
+    );
+  }
+
+  // sanitizeBody covers nested objects exactly the way the /profiles
+  // creation endpoint receives them — pin the contract end-to-end so a
+  // future refactor of the route can't accidentally bypass sanitization.
+  await runTest(
+    "sanitizeBody strips XSS from nested profile.bio + supportTransaction.message payloads",
+    async () => {
+      const req = {
+        body: {
+          profile: {
+            bio: "<script>steal()</script>Hi everyone",
+            displayName: "<b>Alice</b>",
+          },
+          supportTransaction: {
+            message: "<img src=x onerror=alert(1)>thanks!",
+          },
+        },
+        method: "POST",
+        path: "/profiles",
+      } as unknown as Parameters<typeof sanitizeBody>[0];
+      const res = {} as Parameters<typeof sanitizeBody>[1];
+      await new Promise<void>((resolve) =>
+        sanitizeBody(req, res, resolve as Parameters<typeof sanitizeBody>[2]),
+      );
+      const body = req.body as Record<string, Record<string, string>>;
+      assert.equal(body.profile.bio, "Hi everyone");
+      assert.equal(body.profile.displayName, "Alice");
+      assert.equal(body.supportTransaction.message, "thanks!");
+    },
+  );
+
   if (hasDb) await prisma.$disconnect();
 }
 

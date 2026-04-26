@@ -124,3 +124,21 @@ model RecurringSupport {
   @@index([profileId])
   @@index([nextRunAt])
 }
+
+// #281: cursor record for the contract event indexer.
+// One row per (network, contractId) pair. The indexer reads the cursor on
+// start, fetches events strictly after `lastPagingToken`, and updates the
+// row inside the same transaction that persists the new SupportTransaction
+// rows so reprocessing never produces duplicates.
+model IndexerCursor {
+  id              String   @id @default(cuid())
+  network         String
+  contractId      String
+  lastPagingToken String
+  lastLedger      Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@unique([network, contractId])
+  @@map("indexer_cursors")
+}

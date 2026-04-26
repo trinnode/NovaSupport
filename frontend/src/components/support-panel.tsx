@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, KeyboardEvent } from "react";
+import { useToast } from "@/lib/use-toast";
 import { signTransaction } from "@stellar/freighter-api";
 import {
   Asset as StellarAsset,
@@ -63,6 +64,8 @@ export function SupportPanel({
   const [message, setMessage] = useState("");
   const [isAccountFunded, setIsAccountFunded] = useState(true);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { showToast } = useToast();
 
   const networkLabel = getNetworkLabel();
 
@@ -80,6 +83,39 @@ export function SupportPanel({
   const isOverBalance = amountNum > availableBalance;
   const showError = amount !== "" && !isValidAmount;
   const isProcessing = isSigning || isSubmitting || isFindingPath;
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(walletAddress);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = walletAddress;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error("Fallback copy failed");
+      }
+      showToast("Recipient address copied!", "success");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed", err);
+      showToast("Failed to copy address", "error");
+    }
+  }, [walletAddress, showToast]);
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+      e.preventDefault();
+      handleCopy();
+    }
+  };
 
   useEffect(() => {
     if (visitorAddress) {
@@ -455,6 +491,42 @@ export function SupportPanel({
           {networkLabel}
         </span>
       </div>
+
+      <div className="mb-6">
+        <p className="text-xs uppercase tracking-[0.25em] text-gold mb-2">
+          Recipient Address
+        </p>
+        <div className="flex items-center p-3 rounded-xl bg-white/5 border border-white/10 group">
+          <code 
+            onKeyDown={handleKeyDown}
+            tabIndex={0}
+            aria-label={`Recipient Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
+            className="text-xs text-indigo-400 font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded p-1"
+          >
+            {walletAddress}
+          </code>
+          <button 
+            onClick={handleCopy}
+            aria-label="Copy recipient address to clipboard"
+            title="Copy to clipboard"
+            className="ml-2 p-1.5 text-gray-400 hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
+          >
+            {copied ? (
+              <span className="text-mint flex items-center gap-1 text-[10px] font-bold">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                Copied
+              </span>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 12-2h2a2 2 0 12 2m0 0h2a2 2 0 12 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+
       <p className="text-xs uppercase tracking-[0.25em] text-gold">
         Support intent
       </p>

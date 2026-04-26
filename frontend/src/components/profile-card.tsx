@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useCallback, KeyboardEvent } from "react";
 import { isValidStellarAddress } from "@/lib/stellar";
+import { useToast } from "@/lib/use-toast";
 
 import { ProfileCardSkeleton } from "./skeleton";
 
@@ -49,24 +50,57 @@ export function ProfileCard({
 
   if (isLoading) return <ProfileCardSkeleton />;
 
+  const { showToast } = useToast();
   const isValid = isValidStellarAddress(walletAddress);
   const hasSocialLinks = email || websiteUrl || twitterHandle || githubHandle;
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(walletAddress);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(walletAddress);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = walletAddress;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error("Fallback copy failed");
+      }
+      showToast("Wallet address copied!", "success");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed", err);
+      showToast("Failed to copy address", "error");
+    }
+  }, [walletAddress, showToast]);
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+      e.preventDefault();
+      handleCopy();
+    }
   };
 
   const profileUrl = typeof window !== 'undefined' 
     ? `${window.location.origin}/profile/${username}`
     : `https://novasupport.xyz/profile/${username}`;
 
-  const handleCopyLink = async () => {
-    await navigator.clipboard.writeText(profileUrl);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(profileUrl);
+      setLinkCopied(true);
+      showToast("Profile link copied!", "success");
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (err) {
+      showToast("Failed to copy profile link", "error");
+    }
+  }, [profileUrl, showToast]);
 
   const tweetText = encodeURIComponent(`Support me on NovaSupport: ${profileUrl}`);
   const tweetUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
@@ -188,15 +222,30 @@ export function ProfileCard({
               href={expertUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1"
+              onKeyDown={handleKeyDown}
+              aria-label={`Stellar wallet address: ${walletAddress}. Press Ctrl+C to copy.`}
+              className="text-xs text-indigo-500 hover:underline font-mono break-all flex-1 focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
             >
               {walletAddress}
             </a>
             <button 
               onClick={handleCopy} 
-              className="ml-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="Copy wallet address to clipboard"
+              title="Copy to clipboard"
+              className="ml-2 p-1 text-gray-400 hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-mint/50 rounded"
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copied ? (
+                <span className="text-mint flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Copied
+                </span>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 12-2h2a2 2 0 12 2m0 0h2a2 2 0 12 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                </svg>
+              )}
             </button>
           </div>
           <p className={`mt-3 ${isValid ? "text-mint" : "text-gold"}`}>

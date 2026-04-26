@@ -390,6 +390,13 @@ export function createApp(customLogger?: Logger) {
       const search = rawSearch.trim().slice(0, 100);
       const sort = (req.query.sort as string) || "newest";
       const asset = typeof req.query.asset === "string" ? req.query.asset : "";
+      // #287: optional issuer filter so callers can distinguish e.g.
+      // circle.com USDC from a different USDC issuer. Empty value means
+      // "any issuer" and falls back to the existing behaviour.
+      const assetIssuer =
+        typeof req.query.assetIssuer === "string"
+          ? req.query.assetIssuer.trim()
+          : "";
 
       const where = search
         ? {
@@ -439,7 +446,13 @@ export function createApp(customLogger?: Logger) {
         }
 
         const filtered = asset
-          ? sorted.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
+          ? sorted.filter((p: any) =>
+              p.acceptedAssets.some(
+                (a: any) =>
+                  a.code === asset &&
+                  (assetIssuer === "" || a.issuer === assetIssuer),
+              ),
+            )
           : sorted;
 
         const paginated = filtered.slice(offset, offset + limit);
@@ -469,7 +482,13 @@ export function createApp(customLogger?: Logger) {
       ]);
 
       const filtered = asset
-        ? profiles.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
+        ? profiles.filter((p: any) =>
+            p.acceptedAssets.some(
+              (a: any) =>
+                a.code === asset &&
+                (assetIssuer === "" || a.issuer === assetIssuer),
+            ),
+          )
         : profiles;
 
       res.json({
