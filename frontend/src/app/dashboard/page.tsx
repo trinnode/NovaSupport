@@ -8,6 +8,7 @@ import {
   ArrowUpRight, ArrowDownRight, Plus, Edit2, Trash2, X
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { formatRateLimitedMessage, parseRateLimitInfo } from "@/lib/rate-limit";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -112,7 +113,13 @@ export default function DashboardPage() {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to save milestone");
+      if (!res.ok) {
+        if (res.status === 429) {
+          alert(formatRateLimitedMessage(parseRateLimitInfo(res.headers)));
+          return;
+        }
+        throw new Error("Failed to save milestone");
+      }
 
       const newMilestone = await res.json();
 
@@ -152,7 +159,13 @@ export default function DashboardPage() {
         { method: "DELETE" }
       );
 
-      if (!res.ok) throw new Error("Failed to delete milestone");
+      if (!res.ok) {
+        if (res.status === 429) {
+          alert(formatRateLimitedMessage(parseRateLimitInfo(res.headers)));
+          return;
+        }
+        throw new Error("Failed to delete milestone");
+      }
 
       setMilestones(milestones.filter((m) => m.id !== milestoneId));
       setDeleteConfirm(null);
@@ -201,7 +214,7 @@ export default function DashboardPage() {
 
         {/* Summary Cards */}
         {stats && (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard 
               title="Total Earned" 
               value={`${stats.totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM`}
@@ -235,7 +248,7 @@ export default function DashboardPage() {
             {!showMilestoneForm && (
               <button
                 onClick={() => setShowMilestoneForm(true)}
-                className="flex items-center gap-2 rounded-lg bg-mint/10 px-3 py-2 text-xs font-semibold text-mint hover:bg-mint/20 transition-colors"
+                className="flex min-h-[44px] items-center gap-2 rounded-lg bg-mint/10 px-4 py-3 text-xs font-semibold text-mint hover:bg-mint/20 transition-colors"
               >
                 <Plus size={14} />
                 Add Goal
@@ -248,7 +261,7 @@ export default function DashboardPage() {
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-white/10 bg-white/5 p-6"
+              className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6"
             >
               <form onSubmit={handleAddMilestone} className="space-y-4">
                 <div>
@@ -260,7 +273,7 @@ export default function DashboardPage() {
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     placeholder="e.g., Album Production"
-                    className="mt-2 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
+                    className="mt-2 min-h-[44px] w-full rounded-lg bg-white/5 border border-white/10 px-3 py-3 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
                     required
                   />
                 </div>
@@ -278,7 +291,7 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-semibold text-steel uppercase tracking-wider">
                       Target Amount *
@@ -289,7 +302,7 @@ export default function DashboardPage() {
                       value={formData.targetAmount}
                       onChange={(e) => setFormData({ ...formData, targetAmount: e.target.value })}
                       placeholder="1000"
-                      className="mt-2 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
+                      className="mt-2 min-h-[44px] w-full rounded-lg bg-white/5 border border-white/10 px-3 py-3 text-sm text-white placeholder:text-steel/50 focus:outline-none focus:border-mint/50"
                       required
                     />
                   </div>
@@ -301,7 +314,7 @@ export default function DashboardPage() {
                     <select
                       value={formData.assetCode}
                       onChange={(e) => setFormData({ ...formData, assetCode: e.target.value })}
-                      className="mt-2 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-mint/50"
+                      className="mt-2 min-h-[44px] w-full rounded-lg bg-white/5 border border-white/10 px-3 py-3 text-sm text-white focus:outline-none focus:border-mint/50"
                     >
                       <option value="XLM">XLM</option>
                       <option value="USDC">USDC</option>
@@ -314,14 +327,14 @@ export default function DashboardPage() {
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 rounded-lg bg-mint px-4 py-2 text-xs font-semibold text-black hover:bg-mint/90 transition-colors disabled:opacity-50"
+                    className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg bg-mint px-4 py-3 text-xs font-semibold text-black hover:bg-mint/90 transition-colors disabled:opacity-50"
                   >
                     {submitting ? "Saving..." : editingMilestone ? "Update Goal" : "Create Goal"}
                   </button>
                   <button
                     type="button"
                     onClick={cancelForm}
-                    className="rounded-lg bg-white/5 px-4 py-2 text-xs font-semibold text-steel hover:bg-white/10 transition-colors"
+                    className="min-h-[44px] rounded-lg bg-white/5 px-4 py-3 text-xs font-semibold text-steel hover:bg-white/10 transition-colors"
                   >
                     Cancel
                   </button>
@@ -364,14 +377,14 @@ export default function DashboardPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleEditMilestone(milestone)}
-                          className="rounded-lg bg-white/5 p-2 text-steel hover:bg-white/10 transition-colors"
+                          className="min-h-[44px] min-w-[44px] rounded-lg bg-white/5 p-2 text-steel hover:bg-white/10 transition-colors"
                           title="Edit"
                         >
                           <Edit2 size={14} />
                         </button>
                         <button
                           onClick={() => setDeleteConfirm(milestone.id)}
-                          className="rounded-lg bg-white/5 p-2 text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="min-h-[44px] min-w-[44px] rounded-lg bg-white/5 p-2 text-red-400 hover:bg-red-500/10 transition-colors"
                           title="Delete"
                         >
                           <Trash2 size={14} />

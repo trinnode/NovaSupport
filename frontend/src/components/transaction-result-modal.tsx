@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { stellarConfig, withStellarRetry } from "@/lib/stellar";
 
 type TransactionResultModalProps = {
   txHash: string | null;
@@ -20,6 +21,12 @@ export function TransactionResultModal({
   onClose,
 }: TransactionResultModalProps) {
   const [copied, setCopied] = useState(false);
+  const [txStatus, setTxStatus] = useState<
+    "confirming" | "confirmed" | "finalized" | "failed"
+  >("confirming");
+  const [txStatusMessage, setTxStatusMessage] = useState<string | null>(null);
+  const finalizeTimeoutRef = useRef<number | null>(null);
+  const pollingDoneRef = useRef(false);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -31,13 +38,98 @@ export function TransactionResultModal({
     return () => window.removeEventListener("keydown", handleEscape);
   }, [isOpen, onClose]);
 
+  const explorerUrl = useMemo(() => {
+    if (!txHash) return null;
+    return `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+  }, [txHash]);
+
+  useEffect(() => {
+    if (!isOpen || !txHash) return;
+
+    setTxStatus("confirming");
+    setTxStatusMessage(null);
+    pollingDoneRef.current = false;
+
+    const startedAt = Date.now();
+    const intervalMs = 2_000;
+    const maxDurationMs = 30_000;
+    let cancelled = false;
+
+    async function checkOnce() {
+      try {
+        const result = await withStellarRetry(async () => {
+          const res = await fetch(
+            `${stellarConfig.horizonUrl.replace(/\/$/, "")}/transactions/${txHash}`,
+            { cache: "no-store" },
+          );
+
+          if (res.status === 404) return { kind: "pending" } as const;
+          if (!res.ok) throw new Error(`Horizon tx lookup failed: ${res.status}`);
+
+          const json = (await res.json()) as { successful?: boolean };
+          return {
+            kind: "found",
+            successful: Boolean(json.successful),
+          } as const;
+        });
+
+        if (cancelled) return;
+        if (result.kind === "pending") return;
+        if (!result.successful) {
+          setTxStatus("failed");
+          setTxStatusMessage("Transaction failed on-chain.");
+          pollingDoneRef.current = true;
+          return;
+        }
+
+        setTxStatus("confirmed");
+        pollingDoneRef.current = true;
+        if (finalizeTimeoutRef.current) {
+          window.clearTimeout(finalizeTimeoutRef.current);
+        }
+        finalizeTimeoutRef.current = window.setTimeout(() => {
+          setTxStatus("finalized");
+        }, 1500);
+      } catch (err) {
+        if (cancelled) return;
+        setTxStatus("failed");
+        setTxStatusMessage("Couldn't confirm transaction. Please check the explorer.");
+        pollingDoneRef.current = true;
+        console.error("Transaction status polling failed", err);
+      }
+    }
+
+    void checkOnce();
+    const interval = window.setInterval(() => {
+      if (Date.now() - startedAt > maxDurationMs) {
+        window.clearInterval(interval);
+        return;
+      }
+      if (pollingDoneRef.current) {
+        window.clearInterval(interval);
+        return;
+      }
+      void checkOnce();
+    }, intervalMs);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      if (finalizeTimeoutRef.current) {
+        window.clearTimeout(finalizeTimeoutRef.current);
+        finalizeTimeoutRef.current = null;
+      }
+    };
+  }, [isOpen, txHash]);
+
   if (!isOpen || !txHash) return null;
 
-  const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+  const safeExplorerUrl =
+    explorerUrl ?? `https://stellar.expert/explorer/testnet/tx/${txHash}`;
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(explorerUrl);
+      await navigator.clipboard.writeText(safeExplorerUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -86,10 +178,21 @@ export function TransactionResultModal({
           <div className="mb-8 w-full rounded-2xl border border-white/5 bg-white/5 p-4">
             <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-sky/50">Transaction Hash</p>
             <p className="font-mono text-sm text-mint">{truncateHash(txHash)}</p>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-sky/80">
+              <span className="font-semibold text-white">Status:</span>{" "}
+              {txStatus === "confirming" && "Confirming..."}
+              {txStatus === "confirmed" && "Confirmed ✓"}
+              {txStatus === "finalized" && "Finalized"}
+              {txStatus === "failed" && "Failed"}
+              {txStatusMessage ? (
+                <span className="mt-1 block text-red-300">{txStatusMessage}</span>
+              ) : null}
+            </div>
             
             <div className="mt-4 flex gap-2">
               <a
-                href={explorerUrl}
+                href={safeExplorerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-1 rounded-xl bg-white/5 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
@@ -98,6 +201,7 @@ export function TransactionResultModal({
               </a>
               <button
                 onClick={handleCopy}
+                aria-label="Copy Stellar Expert transaction link"
                 className="flex-1 rounded-xl bg-mint px-4 py-2 text-xs font-semibold text-ink transition hover:bg-white"
               >
                 {copied ? "Copied!" : "Copy Link"}

@@ -127,6 +127,21 @@ export function createApp(customLogger?: Logger) {
             bearerFormat: "JWT",
           },
         },
+        headers: {
+          "RateLimit-Limit": {
+            description: "Request limit for the current window.",
+            schema: { type: "integer" },
+          },
+          "RateLimit-Remaining": {
+            description: "Requests remaining in the current window.",
+            schema: { type: "integer" },
+          },
+          "RateLimit-Reset": {
+            description:
+              "Unix timestamp (seconds) when the current rate limit window resets.",
+            schema: { type: "integer" },
+          },
+        },
       },
     },
     apis: ["./src/app.ts"],

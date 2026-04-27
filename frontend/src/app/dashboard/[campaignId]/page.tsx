@@ -475,7 +475,7 @@ export default function DashboardPage() {
                     key={period}
                     type="button"
                     onClick={() => setSelectedPeriod(period)}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    className={`min-h-[44px] rounded-full px-4 py-2 text-xs font-semibold transition ${
                       selectedPeriod === period
                         ? "bg-mint text-ink"
                         : "text-sky/70 hover:text-white"
@@ -624,7 +624,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={handleDownloadCsv}
                 disabled={csvLoading}
-                className="inline-flex items-center justify-center rounded-xl border border-mint/30 bg-mint/10 px-4 py-2 text-xs font-bold text-mint transition hover:bg-mint/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-mint/30 bg-mint/10 px-4 py-2 text-xs font-bold text-mint transition hover:bg-mint/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {csvLoading ? (
                   <span className="flex items-center gap-2">

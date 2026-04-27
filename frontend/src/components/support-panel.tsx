@@ -17,6 +17,7 @@ import {
 import { WalletConnect } from "./wallet-connect";
 import { TransactionResultModal } from "./transaction-result-modal";
 import { API_BASE_URL } from "@/lib/config";
+import { formatRateLimitedMessage, parseRateLimitInfo } from "@/lib/rate-limit";
 
 type Asset = {
   code: string;
@@ -36,6 +37,14 @@ export function SupportPanel({
   profileId,
   recipientDisplayName = "Creator",
 }: SupportPanelProps) {
+  const paymentAssetSelectId = "support-payment-asset";
+  const amountInputId = "support-amount";
+  const amountErrorId = "support-amount-error";
+  const balanceErrorId = "support-balance-error";
+  const messageInputId = "support-message";
+  const recurringToggleId = "support-recurring-toggle";
+  const frequencyGroupId = "support-frequency";
+
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
   const [paymentAsset, setPaymentAsset] = useState<{
@@ -405,7 +414,12 @@ export function SupportPanel({
           if (!backendRes.ok) {
             const data = await backendRes.json().catch(() => ({}));
             // 409 means tx already recorded — silently ignore
-            if (backendRes.status !== 409) {
+            if (backendRes.status === 429) {
+              showToast(
+                formatRateLimitedMessage(parseRateLimitInfo(backendRes.headers)),
+                "error",
+              );
+            } else if (backendRes.status !== 409) {
               console.error("Failed to record transaction in backend", data);
             }
           } else {
@@ -450,6 +464,15 @@ export function SupportPanel({
           );
 
           if (!recurringResponse.ok) {
+            if (recurringResponse.status === 429) {
+              showToast(
+                formatRateLimitedMessage(
+                  parseRateLimitInfo(recurringResponse.headers),
+                ),
+                "error",
+              );
+              throw new Error("Rate limited");
+            }
             throw new Error("Failed to set up recurring support");
           }
         } catch (recurringErr) {
@@ -537,10 +560,15 @@ export function SupportPanel({
       <div className="mt-6 space-y-4">
         {/* Payment Asset Selector */}
         <div>
-          <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+          <label
+            htmlFor={paymentAssetSelectId}
+            className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2"
+          >
             Pay with
           </label>
           <select
+            id={paymentAssetSelectId}
+            aria-label="Payment asset"
             value={
               paymentAsset
                 ? paymentAsset.code === "XLM"
@@ -582,11 +610,17 @@ export function SupportPanel({
         {/* Amount Input */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+            <label
+              htmlFor={amountInputId}
+              className="text-xs uppercase tracking-[0.2em] text-sky/70"
+            >
               Amount
             </label>
             {visitorAddress && (
-              <div className="text-[10px] font-medium text-sky/50">
+              <div
+                className="text-[10px] font-medium text-sky/50"
+                aria-live="polite"
+              >
                 {isBalanceLoading ? (
                   <span className="animate-pulse">Fetching balance...</span>
                 ) : !isAccountFunded ? (
@@ -605,12 +639,16 @@ export function SupportPanel({
           </div>
           <div className="flex gap-2">
             <input
+              id={amountInputId}
               type="number"
               min="0.0000001"
               step="0.0000001"
               placeholder="0.00"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
+              aria-label="Support amount"
+              aria-describedby={`${amountErrorId} ${balanceErrorId}`}
+              aria-invalid={Boolean(showError || (isOverBalance && isValidAmount))}
               className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/50 focus:border-mint/50 focus:outline-none"
             />
             <div className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-sky/80 min-w-[80px] justify-center">
@@ -620,12 +658,12 @@ export function SupportPanel({
             </div>
           </div>
           {showError && (
-            <p className="mt-2 text-xs text-red-400">
+            <p id={amountErrorId} className="mt-2 text-xs text-red-400">
               Please enter a positive amount
             </p>
           )}
           {isOverBalance && isValidAmount && (
-            <p className="mt-2 text-xs text-red-400">
+            <p id={balanceErrorId} className="mt-2 text-xs text-red-400">
               Insufficient balance (Limit: {availableBalance.toFixed(7)})
             </p>
           )}
@@ -653,7 +691,10 @@ export function SupportPanel({
       {/* Message Input */}
       <div className="mt-6">
         <div className="flex items-center justify-between mb-2">
-          <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+          <label
+            htmlFor={messageInputId}
+            className="text-xs uppercase tracking-[0.2em] text-sky/70"
+          >
             Leave a message (optional)
           </label>
           <span className={`text-[10px] font-medium ${message.length >= 28 ? 'text-red-400' : 'text-sky/40'}`}>
@@ -661,10 +702,12 @@ export function SupportPanel({
           </span>
         </div>
         <textarea
+          id={messageInputId}
           value={message}
           onChange={(e) => setMessage(e.target.value.slice(0, 28))}
           placeholder="e.g. Keep up the great work!"
           rows={2}
+          aria-label="Optional message to the creator"
           className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/30 focus:border-mint/50 focus:outline-none resize-none"
         />
       </div>
@@ -673,9 +716,11 @@ export function SupportPanel({
       <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
         <label className="flex items-center gap-3 cursor-pointer">
           <input
+            id={recurringToggleId}
             type="checkbox"
             checked={isRecurring}
             onChange={(e) => setIsRecurring(e.target.checked)}
+            aria-label="Make support recurring"
             className="h-4 w-4 rounded border-white/20 bg-white/10 text-mint focus:ring-mint focus:ring-offset-0"
           />
           <span className="text-sm text-white font-medium">
@@ -685,13 +730,17 @@ export function SupportPanel({
 
         {isRecurring && (
           <div className="mt-4">
-            <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+            <label
+              id={frequencyGroupId}
+              className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2"
+            >
               Frequency
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="group" aria-labelledby={frequencyGroupId}>
               <button
                 type="button"
                 onClick={() => setFrequency("weekly")}
+                aria-label="Set recurring frequency to weekly"
                 className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition ${
                   frequency === "weekly"
                     ? "bg-mint text-ink"
@@ -703,6 +752,7 @@ export function SupportPanel({
               <button
                 type="button"
                 onClick={() => setFrequency("monthly")}
+                aria-label="Set recurring frequency to monthly"
                 className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition ${
                   frequency === "monthly"
                     ? "bg-mint text-ink"
