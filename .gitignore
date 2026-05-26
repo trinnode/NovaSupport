@@ -25,6 +25,8 @@ is.md
 issue.md
 pr.md
 checks.md
+fix.md
+checklist.md
 .agents/
 .claude/
 skills-lock.json
@@ -42,6 +44,18 @@ generated_*.md
 analysis_*.md
 summary_*.md
 notes_*.md
+
+# Ignore all .md files except important documentation
+*.md
+!README.md
+!ARCHITECTURE.md
+!CONTRIBUTING.md
+!LICENSE.md
+!CHANGELOG.md
+# Allow docs folder markdown files
+!docs/**/*.md
+# Allow contract documentation
+!contract/**/*.md
 
 # GitHub Issue Automation Scripts
 scripts/
