@@ -1430,50 +1430,6 @@ export function createApp(customLogger?: Logger) {
 
   // Issue #229 — 409 DUPLICATE_TX handled below in the full support-transactions handler
 
-  // Issue #204 — GET /profiles (explore page, paginated + sortable + asset filter)
-  app.get("/profiles", async (req, res) => {
-    const pagination = paginationSchema.safeParse(req.query);
-    if (!pagination.success) {
-      return sendError(res, 400, "Invalid pagination parameters", "INVALID_PAGINATION");
-    }
-    const { limit, offset } = pagination.data;
-    const sort = (req.query.sort as string) || "newest";
-    const asset = req.query.asset as string | undefined;
-
-    const assetFilter = asset
-      ? { acceptedAssets: { some: { code: asset } } }
-      : {};
-
-    let orderBy: any;
-    if (sort === "most_supported") {
-      orderBy = { supportTransactions: { _count: "desc" } };
-    } else if (sort === "most_transactions") {
-      orderBy = { supportTransactions: { _count: "desc" } };
-    } else {
-      orderBy = { createdAt: "desc" };
-    }
-
-    const [profiles, total] = await Promise.all([
-      prisma.profile.findMany({
-        where: assetFilter,
-        take: limit,
-        skip: offset,
-        orderBy,
-        select: {
-          username: true,
-          displayName: true,
-          avatarUrl: true,
-          bio: true,
-          createdAt: true,
-          acceptedAssets: { select: { code: true, issuer: true } },
-        },
-      }),
-      prisma.profile.count({ where: assetFilter }),
-    ]);
-
-    res.json({ profiles, total, limit, offset });
-  });
-
   // Issue #220 — Webhook CRUD endpoints
   const webhookCreateSchema = z.object({
     url: z.string().url().startsWith("https://"),
@@ -2023,6 +1979,7 @@ export function createApp(customLogger?: Logger) {
    */
   app.post(
     "/profiles/:username/avatar",
+    requireAuth,
     writeLimiter,
     upload.single("avatar"),
     async (req, res) => {
@@ -2043,6 +2000,11 @@ export function createApp(customLogger?: Logger) {
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
+      }
+
+      // Verify authenticated wallet owns the profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
       const path = `avatars/${username}`;
@@ -2101,14 +2063,20 @@ export function createApp(customLogger?: Logger) {
     assetCode: z.string().default("XLM"),
   });
 
-  app.post("/profiles/:username/milestones", async (req, res) => {
+  app.post("/profiles/:username/milestones", requireAuth, writeLimiter, async (req, res) => {
     try {
+      const username = req.params.username as string;
       const profile = await prisma.profile.findUnique({
-        where: { username: req.params.username },
+        where: { username },
       });
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
+      }
+
+      // Verify authenticated wallet owns the profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
       }
 
       const parsed = createMilestoneSchema.safeParse(req.body);
@@ -2153,18 +2121,26 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.patch("/profiles/:username/milestones/:milestoneId", async (req, res) => {
+  app.patch("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
     try {
+      const username = req.params.username as string;
+      const milestoneId = req.params.milestoneId as string;
+      
       const profile = await prisma.profile.findUnique({
-        where: { username: req.params.username },
+        where: { username },
       });
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
       }
 
+      // Verify authenticated wallet owns the profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
+      }
+
       const milestone = await prisma.milestone.findUnique({
-        where: { id: req.params.milestoneId },
+        where: { id: milestoneId },
       });
 
       if (!milestone || milestone.profileId !== profile.id) {
@@ -2177,7 +2153,7 @@ export function createApp(customLogger?: Logger) {
       }
 
       const updated = await prisma.milestone.update({
-        where: { id: req.params.milestoneId },
+        where: { id: milestoneId },
         data: parsed.data,
       });
 
@@ -2187,18 +2163,26 @@ export function createApp(customLogger?: Logger) {
     }
   });
 
-  app.delete("/profiles/:username/milestones/:milestoneId", async (req, res) => {
+  app.delete("/profiles/:username/milestones/:milestoneId", requireAuth, writeLimiter, async (req, res) => {
     try {
+      const username = req.params.username as string;
+      const milestoneId = req.params.milestoneId as string;
+      
       const profile = await prisma.profile.findUnique({
-        where: { username: req.params.username },
+        where: { username },
       });
 
       if (!profile) {
         return sendError(res, 404, "Profile not found");
       }
 
+      // Verify authenticated wallet owns the profile
+      if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+        return sendError(res, 403, "Forbidden: You do not own this profile");
+      }
+
       const milestone = await prisma.milestone.findUnique({
-        where: { id: req.params.milestoneId },
+        where: { id: milestoneId },
       });
 
       if (!milestone || milestone.profileId !== profile.id) {
@@ -2206,7 +2190,7 @@ export function createApp(customLogger?: Logger) {
       }
 
       await prisma.milestone.delete({
-        where: { id: req.params.milestoneId },
+        where: { id: milestoneId },
       });
 
       res.status(204).send();
