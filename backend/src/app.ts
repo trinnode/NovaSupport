@@ -3113,13 +3113,35 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         total: total.toFixed(7),
       }));
 
-      const recentTransactions = transactions.slice(0, 10).map((tx: any) => ({
+      const supportedProfiles = Array.from(
+        transactions
+          .reduce((profiles: Map<string, { username: string; displayName: string; totalTransactions: number }>, tx: any) => {
+            const existing = profiles.get(tx.profileId);
+            if (existing) {
+              existing.totalTransactions += 1;
+              return profiles;
+            }
+
+            profiles.set(tx.profileId, {
+              username: tx.profile.username,
+              displayName: tx.profile.displayName,
+              totalTransactions: 1,
+            });
+            return profiles;
+          }, new Map())
+          .values(),
+      ).sort((a, b) => b.totalTransactions - a.totalTransactions);
+
+      const history = transactions.map((tx: any) => ({
+        id: tx.id,
         profileUsername: tx.profile.username,
         profileDisplayName: tx.profile.displayName,
         amount: tx.amount.toString(),
         assetCode: tx.assetCode,
+        assetIssuer: tx.assetIssuer,
         createdAt: tx.createdAt,
         txHash: tx.txHash,
+        message: tx.message,
       }));
 
       return res.json({
@@ -3127,7 +3149,9 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         totalTransactions: transactions.length,
         profilesSupported,
         totalByAsset,
-        recentTransactions,
+        supportedProfiles,
+        transactions: history,
+        recentTransactions: history.slice(0, 10),
       });
     } catch {
       return sendError(res, 500, "Internal server error");
