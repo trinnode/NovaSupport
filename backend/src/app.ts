@@ -2888,9 +2888,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
             recipientProfile?.notifyOnSupport ??
             true;
 
-          if (recipientProfile?.owner?.email && notifyOnSupport) {
+          // Only send email if profile has verified email (#417)
+          if (
+            recipientProfile?.email &&
+            recipientProfile.emailVerified &&
+            notifyOnSupport
+          ) {
             sendSupportReceivedEmail({
-              to: recipientProfile.owner.email,
+              to: recipientProfile.email,
               fromAddress: supportRecord.supporterAddress ?? "Anonymous",
               amount: supportRecord.amount.toString(),
               assetCode: supportRecord.assetCode,
