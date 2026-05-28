@@ -373,7 +373,12 @@ export default function CreatePage() {
                       required
                       placeholder="G…"
                       value={form.walletAddress}
-                      onChange={set("walletAddress")}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const cleaned = raw.length > 56 && !raw.startsWith("G") ? raw.slice(0, 56) : raw;
+                        setForm((prev) => ({ ...prev, walletAddress: cleaned }));
+                        setError(null);
+                      }}
                       className={`w-full rounded-2xl border bg-white/5 px-4 py-3 text-sm font-mono placeholder:text-steel/40 focus:outline-none focus:ring-1 transition ${
                         !walletValid && form.walletAddress
                           ? "border-red-500/40 text-red-400 focus:ring-red-500/20 focus:border-red-500/50"
@@ -393,13 +398,24 @@ export default function CreatePage() {
                     )}
                   </div>
                   {form.walletAddress && !walletValidation.isValid && (
-                    <p className="mt-2 text-[10px] font-medium text-red-400 animate-in fade-in slide-in-from-top-1 duration-200">
-                      {walletValidation.error}
+                    <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/8 px-3 py-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <p className="text-[11px] font-medium text-red-400">
+                        {walletValidation.error}
+                      </p>
+                    </div>
+                  )}
+                  {!form.walletAddress && (
+                    <p className="text-[11px] text-steel/50 pl-1 mt-1">
+                      Exactly <strong className="text-steel">56 characters</strong> starting with{" "}
+                      <strong className="text-steel">G</strong> (letters A–Z, digits 2–7).
+                      Example: <code className="text-xs text-sky/60">GABCDEFGHIJKLMNOPQRSTUVWXYZ234567</code>
                     </p>
                   )}
-                  <p className="text-[10px] text-steel/50 pl-1 mt-1">
-                    56-character Stellar public key starting with G
-                  </p>
+                  {form.walletAddress && walletValid && (
+                    <p className="text-[11px] text-mint/70 pl-1 mt-1">
+                      ✓ Valid Stellar address
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-3">

@@ -1,9 +1,6 @@
-import { createHmac } from "node:crypto";
 import { prisma } from "../db.js";
 import { logger } from "../logger.js";
-import { Prisma } from "@prisma/client";
-
-const BACKOFF_SCHEDULE = [1, 10, 100]; // in seconds
+import { deliverWebhook, shouldRetry, getNextRetryDelay } from "./webhook.js";
 
 export async function processPendingWebhookDeliveries() {
   const now = new Date();
@@ -12,7 +9,7 @@ export async function processPendingWebhookDeliveries() {
     where: {
       status: "pending",
       nextRetryAt: { lte: now },
-      attemptCount: { lt: BACKOFF_SCHEDULE.length + 1 },
+      attemptCount: { lt: 4 },
     },
     include: {
       webhook: true,
@@ -21,58 +18,44 @@ export async function processPendingWebhookDeliveries() {
   });
 
   for (const delivery of pendingDeliveries) {
-    try {
-      const payloadString = JSON.stringify(delivery.payload);
-      const signature = createHmac("sha256", delivery.webhook.secret)
-        .update(payloadString)
-        .digest("hex");
+    const payload = delivery.payload as Record<string, unknown>;
+    const result = await deliverWebhook(delivery.webhook.url, delivery.webhook.secret, payload);
 
-      const response = await fetch(delivery.webhook.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-NovaSupport-Signature": signature,
+    if (result.status === "success") {
+      await prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "success",
+          attemptCount: delivery.attemptCount + 1,
+          lastError: null,
         },
-        body: payloadString,
-        signal: AbortSignal.timeout(10_000),
       });
-
-      if (response.ok) {
-        await prisma.webhookDelivery.update({
-          where: { id: delivery.id },
-          data: {
-            status: "success",
-            attemptCount: delivery.attemptCount + 1,
-            lastError: null,
-          },
-        });
-        logger.info({ deliveryId: delivery.id, status: response.status }, "Webhook delivered successfully");
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (error: any) {
+      logger.info({ deliveryId: delivery.id, statusCode: result.statusCode }, "Webhook delivered successfully");
+    } else {
       const nextAttempt = delivery.attemptCount + 1;
-      const isFinalAttempt = nextAttempt >= BACKOFF_SCHEDULE.length + 1;
-      
+      const willRetry = result.willRetry && shouldRetry(nextAttempt);
+
       let nextRetryAt: Date | undefined;
-      if (!isFinalAttempt) {
-        const delaySec = BACKOFF_SCHEDULE[delivery.attemptCount];
-        nextRetryAt = new Date(Date.now() + delaySec * 1000);
+      if (willRetry) {
+        const delayMs = getNextRetryDelay(delivery.attemptCount);
+        if (delayMs !== null) {
+          nextRetryAt = new Date(Date.now() + delayMs);
+        }
       }
 
       await prisma.webhookDelivery.update({
         where: { id: delivery.id },
         data: {
-          status: isFinalAttempt ? "failed" : "pending",
+          status: willRetry ? "pending" : "failed",
           attemptCount: nextAttempt,
           nextRetryAt,
-          lastError: error.message || String(error),
+          lastError: result.error,
         },
       });
 
       logger.warn(
-        { deliveryId: delivery.id, attempt: nextAttempt, nextRetryAt, err: error },
-        isFinalAttempt ? "Webhook delivery failed permanently" : "Webhook delivery failed, scheduled retry"
+        { deliveryId: delivery.id, attempt: nextAttempt, nextRetryAt, error: result.error },
+        willRetry ? "Webhook delivery failed, scheduled retry" : "Webhook delivery failed permanently"
       );
     }
   }
@@ -80,9 +63,9 @@ export async function processPendingWebhookDeliveries() {
 
 export function startWebhookProcessor() {
   const interval = Number(process.env.WEBHOOK_PROCESSOR_INTERVAL_MS ?? 10000);
-  
+
   logger.info({ interval }, "Starting webhook processor...");
-  
+
   setInterval(() => {
     processPendingWebhookDeliveries().catch((err) => {
       logger.error({ err }, "Error in webhook processor interval");

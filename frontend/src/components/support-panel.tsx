@@ -13,6 +13,8 @@ import {
   getNetworkLabel,
   horizonServer,
   stellarConfig,
+  withStellarRetry,
+  classifyStellarError,
 } from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
 import { TransactionResultModal } from "./transaction-result-modal";
@@ -75,6 +77,7 @@ export function SupportPanel({
   const [isAccountFunded, setIsAccountFunded] = useState(true);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [retryStatus, setRetryStatus] = useState<string | null>(null);
   const { showToast } = useToast();
 
   const networkLabel = getNetworkLabel();
@@ -131,14 +134,22 @@ export function SupportPanel({
     if (visitorAddress) {
       setIsBalanceLoading(true);
       setIsAccountFunded(true);
-      horizonServer
-        .loadAccount(visitorAddress)
+      setRetryStatus(null);
+      withStellarRetry(
+        () => horizonServer.loadAccount(visitorAddress),
+        {
+          onRetry: (info) => {
+            setRetryStatus(
+              `Stellar network issue — retrying (attempt ${info.attempt + 1} of 4)…`
+            );
+          },
+        },
+      )
         .then((acc) => {
           const balances = acc.balances.filter(
             (b: any) => parseFloat(b.balance) > 0 || b.asset_type === "native",
           );
           setVisitorBalances(balances);
-          // Default to XLM if available, else first balance
           const xlm = balances.find((b: any) => b.asset_type === "native");
           if (xlm) {
             setPaymentAsset({ code: "XLM" });
@@ -151,10 +162,18 @@ export function SupportPanel({
               });
             }
           }
+          setRetryStatus(null);
         })
         .catch((err: any) => {
           if (err?.response?.status === 404) {
             setIsAccountFunded(false);
+          }
+          const classified = classifyStellarError(err);
+          if (classified.retryable) {
+            setRetryStatus(null);
+            setErrorMessage(
+              "Could not connect to the Stellar network. Please check your connection and try again."
+            );
           }
           console.error("Failed to load visitor account", err);
         })
@@ -188,6 +207,7 @@ export function SupportPanel({
 
       setIsFindingPath(true);
       setNoPathFound(false);
+      setErrorMessage(null);
       try {
         const sourceAsset =
           paymentAsset.code === "XLM"
@@ -198,18 +218,28 @@ export function SupportPanel({
             ? StellarAsset.native()
             : new StellarAsset(recipientAsset.code, recipientAsset.issuer!);
 
-        const paths = await horizonServer
-          .strictSendPaths(sourceAsset, amount, [destAsset])
-          .call();
+        const paths = await withStellarRetry(
+          () => horizonServer.strictSendPaths(sourceAsset, amount, [destAsset]).call(),
+          {
+            onRetry: (info) => {
+              setErrorMessage(
+                `Finding exchange path — retrying (attempt ${info.attempt + 1} of 4)…`
+              );
+            },
+          },
+        );
         if (paths.records.length > 0) {
           setEstimatedReceived(paths.records[0].destination_amount);
         } else {
           setNoPathFound(true);
           setEstimatedReceived(null);
         }
+        setErrorMessage(null);
       } catch (err) {
-        console.error("Pathfinding error", err);
+        const classified = classifyStellarError(err);
+        setErrorMessage(classified.userMessage);
         setNoPathFound(true);
+        console.error("Pathfinding error", err);
       } finally {
         setIsFindingPath(false);
       }
@@ -381,16 +411,26 @@ export function SupportPanel({
     setIsSigning(false);
     setIsSubmitting(true);
 
+    let response: any;
     try {
+      setRetryStatus(null);
       const transactionToSubmit = TransactionBuilder.fromXDR(
         resolvedSignedXdr,
         stellarConfig.networkPassphrase,
       );
 
-      // Broadcast to Stellar Testnet via Horizon
-      const response =
-        await horizonServer.submitTransaction(transactionToSubmit);
+      response = await withStellarRetry(
+        () => horizonServer.submitTransaction(transactionToSubmit),
+        {
+          onRetry: (info) => {
+            setRetryStatus(
+              `Submitting to Stellar network — retrying (attempt ${info.attempt + 1} of 4)…`
+            );
+          },
+        },
+      );
 
+      setRetryStatus(null);
       console.log("Transaction submitted to Horizon:", response.hash);
       let displayHash = response.hash;
 
@@ -513,8 +553,17 @@ export function SupportPanel({
       }
 
       setAmount("");
+      setRetryStatus(null);
     } catch (error) {
-      setErrorMessage(mapHorizonError(error));
+      const classified = classifyStellarError(error);
+      if (classified.kind === "network" || classified.kind === "server_error" || classified.kind === "rate_limited") {
+        setRetryStatus(null);
+        setErrorMessage(
+          "Unable to reach the Stellar network after multiple attempts. Your transaction is still in your wallet — please try again later."
+        );
+      } else {
+        setErrorMessage(mapHorizonError(error));
+      }
     } finally {
       setIsSigning(false);
       setIsSubmitting(false);
@@ -796,6 +845,16 @@ export function SupportPanel({
           </div>
         )}
       </div>
+
+      {retryStatus && (
+        <div className="mt-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200 flex items-center gap-2">
+          <svg className="animate-spin h-3.5 w-3.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          {retryStatus}
+        </div>
+      )}
 
       {errorMessage && (
         <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">

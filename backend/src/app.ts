@@ -32,7 +32,7 @@ import {
   setCachedLeaderboard,
   type LeaderboardSort,
 } from "./services/profile-leaderboard-cache.js";
-import { createHmac } from "crypto";
+import { generateSignature } from "./services/webhook.js";
 import { sanitizeBody, sanitizeQuery } from "./middleware/sanitize.js";
 import { CircuitBreaker } from "./services/circuit-breaker.js";
 import {
@@ -2962,9 +2962,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
               createdAt: supportRecord.createdAt.toISOString(),
             });
 
-            const signature = createHmac("sha256", webhook.secret)
-              .update(payload)
-              .digest("hex");
+            const signature = generateSignature(webhook.secret, JSON.parse(payload));
 
             // Persist for background delivery with exponential backoff (#webhook-persistence)
             await prisma.webhookDelivery.create({
