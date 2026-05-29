@@ -6,6 +6,7 @@ on:
       - "frontend/**"
       - ".github/workflows/frontend.yml"
       - "lighthouserc.js"
+      - "budget.json"
   push:
     branches:
       - main
@@ -13,6 +14,7 @@ on:
       - "frontend/**"
       - ".github/workflows/frontend.yml"
       - "lighthouserc.js"
+      - "budget.json"
 
 jobs:
   frontend:
@@ -57,3 +59,159 @@ jobs:
         run: npx @lhci/cli@0.14.x autorun --config=../lighthouserc.js
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+
+      - name: Upload Lighthouse report artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-results-${{ github.sha }}
+          path: frontend/.lighthouseci/
+          retention-days: 14
+
+      - name: Comment PR with Lighthouse results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request_target' && always()
+        env:
+          RESULTS_DIR: frontend/.lighthouseci/
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+
+            const resultsDir = path.join(
+              process.env.GITHUB_WORKSPACE,
+              process.env.RESULTS_DIR
+            );
+            const prNumber =
+              context.issue.number || context.payload.pull_request?.number;
+            if (!prNumber) {
+              console.log("Not a PR — skipping comment");
+              return;
+            }
+
+            // Collect report URL from LHCI links
+            let reportUrl = null;
+            const linksPath = path.join(resultsDir, "links.json");
+            if (fs.existsSync(linksPath)) {
+              try {
+                const links = JSON.parse(fs.readFileSync(linksPath, "utf8"));
+                if (links.length > 0) reportUrl = links[0];
+              } catch {
+                console.log("Could not parse links.json");
+              }
+            }
+
+            // Read LHR files to extract scores
+            let scores = [];
+            try {
+              const files = fs.readdirSync(resultsDir);
+              const lhrFiles = files.filter(
+                (f) => f.startsWith("lhr-") && f.endsWith(".json")
+              );
+              scores = lhrFiles.map((f) => {
+                const lhr = JSON.parse(
+                  fs.readFileSync(path.join(resultsDir, f), "utf8")
+                );
+                return {
+                  performance: Math.round(
+                    ((lhr.categories.performance?.score ?? 0) * 100)
+                  ),
+                  accessibility: Math.round(
+                    ((lhr.categories.accessibility?.score ?? 0) * 100)
+                  ),
+                  bestPractices: Math.round(
+                    ((lhr.categories["best-practices"]?.score ?? 0) * 100)
+                  ),
+                  seo: Math.round(
+                    ((lhr.categories.seo?.score ?? 0) * 100)
+                  ),
+                  lcp: lhr.audits["largest-contentful-paint"]?.numericValue,
+                  tbt: lhr.audits["total-blocking-time"]?.numericValue,
+                  cls: lhr.audits["cumulative-layout-shift"]?.numericValue,
+                };
+              });
+            } catch (e) {
+              console.log("Could not read LHR files:", e.message);
+            }
+
+            if (scores.length === 0) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: prNumber,
+                body:
+                  "## Lighthouse Report 🚀\n\n" +
+                  "⚠️ Lighthouse results not available. " +
+                  "The audit may have failed during collection.\n",
+              });
+              return;
+            }
+
+            // Average scores across runs
+            const count = scores.length;
+            const avg = (key) =>
+              scores.reduce((sum, s) => sum + (s[key] || 0), 0) / count;
+
+            const perf = avg("performance");
+            const access = avg("accessibility");
+            const bp = avg("bestPractices");
+            const seoScore = avg("seo");
+            const lcp = avg("lcp");
+            const tbt = avg("tbt");
+            const cls = avg("cls");
+
+            const badge = (score, pass) =>
+              score >= pass ? `${score} 🟢` : `${score} 🔴`;
+
+            const fmtMs = (v) =>
+              v != null ? `${Math.round(v)} ms` : "—";
+            const fmtSec = (v) =>
+              v != null ? `${(v / 1000).toFixed(2)} s` : "—";
+            const fmtCls = (v) =>
+              v != null ? v.toFixed(3) : "—";
+
+            const body = [
+              "## Lighthouse Report 🚀\n",
+              "| Category | Score |",
+              "|----------|-------|",
+              `| **Performance** | ${badge(perf, 70)} |`,
+              `| **Accessibility** | ${badge(access, 85)} |`,
+              `| **Best Practices** | ${badge(bp, 80)} |`,
+              `| **SEO** | ${badge(seoScore, 85)} |\n`,
+              "### Web Vitals",
+              "| Metric | Value |",
+              "|--------|-------|",
+              `| **LCP** (target < 4.0 s) | ${fmtSec(lcp)} |`,
+              `| **TBT** (target < 500 ms) | ${fmtMs(tbt)} |`,
+              `| **CLS** (target < 0.15) | ${fmtCls(cls)} |\n`,
+              reportUrl
+                ? `[View full report](${reportUrl})\n`
+                : "",
+              `_Ran ${count} audit(s) on ${new Date().toISOString().split("T")[0]}_`,
+            ].join("\n");
+
+            // Find existing bot comment to update (for re-runs)
+            const { data: comments } =
+              await github.rest.issues.listComments({
+                ...context.repo,
+                issue_number: prNumber,
+              });
+
+            const botComment = comments.find(
+              (c) =>
+                c.user?.type === "Bot" &&
+                /Lighthouse Report/.test(c.body || "")
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

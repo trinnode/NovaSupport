@@ -5,6 +5,8 @@ on:
     paths:
       - "frontend/**"
       - ".github/workflows/frontend-validation.yml"
+      - "lighthouserc.js"
+      - "budget.json"
     types: [opened, synchronize, reopened]
   push:
     branches:
@@ -76,3 +78,4 @@ jobs:
           configPath: ./frontend/lighthouserc.js
           uploadArtifacts: true
           temporaryPublicStorage: true
+          comment: true

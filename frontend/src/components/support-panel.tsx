@@ -820,7 +820,7 @@ export function SupportPanel({
           {isSubmitting
             ? "Submitting to Stellar network…"
             : isSigning
-              ? "Waiting for Freighter signature…"
+              ? "Waiting for wallet signature…"
               : isFindingPath
                 ? "Finding best exchange path…"
                 : "Send Support"}
