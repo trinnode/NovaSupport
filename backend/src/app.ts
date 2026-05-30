@@ -39,6 +39,10 @@ import {
   validateUsername,
   validateUsernameWithTakenCheck,
 } from "./utils/username-validator.js";
+import {
+  verifyTransaction as verifyTransactionService,
+  type ExpectedTxDetails,
+} from "./services/verify-transaction.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -2120,68 +2124,23 @@ All errors return JSON with an \`error\` field and optional \`code\`:
     supporterId: z.string().optional().nullable(),
   });
 
-  const verificationCache = new Map<string, { result: boolean; timestamp: number }>();
-  const VERIFICATION_CACHE_TTL = 60 * 60 * 1000;
-
   async function verifyTransaction(
     txHash: string,
     retries = 3,
     backoffMs = 1000,
-    req?: express.Request
+    req?: express.Request,
+    expected?: ExpectedTxDetails
   ): Promise<boolean | "error"> {
-    const cached = verificationCache.get(txHash);
-    if (cached && Date.now() - cached.timestamp < VERIFICATION_CACHE_TTL) {
-      return cached.result;
-    }
-
-    const verify = async () => {
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          const tx = await stellarServer.transactions().transaction(txHash).call();
-          const result = tx.successful === true;
-          
-          if (result) {
-            verificationCache.set(txHash, { result, timestamp: Date.now() });
-          }
-          
-          return result;
-        } catch (e: unknown) {
-          if (
-            e &&
-            typeof e === "object" &&
-            "response" in e &&
-            e.response &&
-            typeof e.response === "object" &&
-            "status" in e.response &&
-            e.response.status === 404
-          ) {
-            return false;
-          }
-
-          if (attempt < retries) {
-            const delay = backoffMs * Math.pow(2, attempt - 1);
-            const log = req?.log ?? logger;
-            log.warn(
-              { txHash, attempt, delay, err: e },
-              "Horizon verification failed, retrying"
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            throw e;
-          }
-        }
-      }
-      return "error" as const;
-    };
-
     try {
-      return await horizonCircuitBreaker.execute(verify);
+      return await horizonCircuitBreaker.execute(() =>
+        verifyTransactionService(stellarServer, txHash, retries, backoffMs, expected)
+      );
     } catch (e: any) {
       const log = req?.log ?? logger;
       if (e.message === "Circuit breaker is OPEN") {
-        log.warn({ txHash }, "Horizon circuit breaker is OPEN, skipping call");
+        log.warn({ txHash }, "Horizon circuit breaker is OPEN, skipping verification");
       } else {
-        log.error({ txHash, err: e }, "Horizon error verifying transaction after retries");
+        log.error({ txHash, err: e }, "Horizon error verifying transaction");
       }
       return "error";
     }
@@ -2859,13 +2818,21 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         return res.status(400).json({ error: flat });
       }
 
-      const verification = await verifyTransaction(parsed.data.txHash, 3, 1000, req);
+      const expectedDetails: ExpectedTxDetails = {
+        amount: parsed.data.amount,
+        recipientAddress: parsed.data.recipientAddress,
+        assetCode: parsed.data.assetCode,
+        assetIssuer: parsed.data.assetIssuer,
+      };
+
+      const verification = await verifyTransaction(parsed.data.txHash, 3, 1000, req, expectedDetails);
 
       if (verification === false) {
         return res
           .status(422)
           .json({
-            error: "Transaction hash not found or not successful on Horizon.",
+            error:
+              "Transaction not found, not successful, or payment details (amount/recipient/asset) do not match.",
           });
       }
 
