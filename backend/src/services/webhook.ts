@@ -38,10 +38,10 @@ export async function deliverWebhook(
   const signature = generateSignature(secret, payload);
   const payloadString = JSON.stringify(payload);
 
-  const controller = new AbortController();
+  const timeoutSignal = AbortSignal.timeout(DELIVERY_TIMEOUT_MS);
   const mergedSignal = signal
-    ? combineSignals(signal, controller.signal, DELIVERY_TIMEOUT_MS)
-    : AbortSignal.timeout(DELIVERY_TIMEOUT_MS);
+    ? combineSignals(signal, timeoutSignal)
+    : timeoutSignal;
 
   try {
     const response = await fetch(url, {

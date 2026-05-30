@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { Keypair } from "@stellar/stellar-sdk";
+import jwt from "jsonwebtoken";
 import {
   generateChallenge,
   verifySignature,
@@ -238,6 +239,18 @@ async function main() {
   await runTest("verifyJWT rejects empty token", async () => {
     const decoded = verifyJWT("");
     assert.equal(decoded, null, "Empty token should return null");
+  });
+
+  await runTest("verifyJWT rejects expired token", async () => {
+    const walletAddress = "GCZJM35NKGVK47BB4SPBDV25477PZYIYPVVG453LPYFNXLS3FGHDXOCM";
+    const token = jwt.sign(
+      { walletAddress },
+      process.env.JWT_SECRET as string,
+      { expiresIn: "-1s" },
+    );
+
+    const decoded = verifyJWT(token);
+    assert.equal(decoded, null, "Expired token should return null");
   });
 
   // ── Stellar Address Validation Tests ─────────────────────────────────────

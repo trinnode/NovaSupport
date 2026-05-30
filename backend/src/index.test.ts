@@ -12,7 +12,6 @@ const walletAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 
 let baseUrl = "";
 let profileId = "";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let userId = "";
 let server: ReturnType<typeof app.listen>;
 let authToken = "";
@@ -151,6 +150,36 @@ async function main() {
       assert.equal(profile.username, baseUsername);
       assert.equal(profile.walletAddress, walletAddress);
       assert.equal(profile.acceptedAssets.length, 2);
+    });
+
+    await runTest("GET /profiles/:username exposes isOwner only for authenticated requests", async () => {
+      const unauthenticated = await fetch(`${baseUrl}/profiles/${baseUsername}`);
+      assert.equal(unauthenticated.status, 200);
+      const publicProfile = await unauthenticated.json();
+      assert.equal("isOwner" in publicProfile, false);
+
+      const ownerResponse = await fetch(`${baseUrl}/profiles/${baseUsername}`, {
+        headers: { authorization: `Bearer ${authToken}` },
+      });
+      assert.equal(ownerResponse.status, 200);
+      const ownerProfile = await ownerResponse.json();
+      assert.equal(ownerProfile.isOwner, true);
+
+      const otherUser = await prisma.user.create({
+        data: { email: `other-${randomUUID()}@example.com` },
+      });
+
+      try {
+        const otherToken = signJWT(Keypair.random().publicKey(), otherUser.id);
+        const otherResponse = await fetch(`${baseUrl}/profiles/${baseUsername}`, {
+          headers: { authorization: `Bearer ${otherToken}` },
+        });
+        assert.equal(otherResponse.status, 200);
+        const otherProfile = await otherResponse.json();
+        assert.equal(otherProfile.isOwner, false);
+      } finally {
+        await prisma.user.deleteMany({ where: { id: otherUser.id } });
+      }
     });
 
     await runTest("returns profile stats summary using all non-failed transactions", async () => {
@@ -760,6 +789,36 @@ async function main() {
       });
 
       assert.equal(response.status, 201, "Should be able to create profile with valid JWT");
+    });
+
+    await runTest("auth flow: HTTP challenge -> signature verify -> JWT", async () => {
+      const keypair = Keypair.random();
+      const testWalletAddress = keypair.publicKey();
+
+      const challengeResponse = await fetch(`${baseUrl}/auth/challenge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ walletAddress: testWalletAddress }),
+      });
+      assert.equal(challengeResponse.status, 200);
+      const challengeBody = await challengeResponse.json();
+      assert.equal(challengeBody.walletAddress, testWalletAddress);
+      assert.equal(typeof challengeBody.challenge, "string");
+
+      const signature = keypair
+        .sign(Buffer.from(challengeBody.challenge, "utf8"))
+        .toString("base64");
+
+      const verifyResponse = await fetch(`${baseUrl}/auth/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ walletAddress: testWalletAddress, signature }),
+      });
+      assert.equal(verifyResponse.status, 200);
+      const verifyBody = await verifyResponse.json();
+      assert.equal(verifyBody.walletAddress, testWalletAddress);
+      assert.equal(typeof verifyBody.token, "string");
+      assert.equal(typeof verifyBody.userId, "string");
     });
 
     await runTest("auth flow: rejects invalid signature", async () => {

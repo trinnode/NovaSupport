@@ -374,6 +374,18 @@ const preparedTx = await server.prepareTransaction(tx);
 
 ### Deployment & Upgrades
 
+Soroban contract code is immutable for a deployed contract ID. Treat every deploy as a new release candidate: test the WASM locally, deploy to Testnet, then update clients only after verification.
+
+#### Pre-deploy verification
+
+```bash
+cd contract
+cargo test
+stellar contract build
+```
+
+Before updating `NEXT_PUBLIC_CONTRACT_ID` or backend indexer config, invoke the Testnet contract with a funded account and confirm `support_count` and `recipient_count` return expected values.
+
 #### Initial Deployment
 
 Follow these steps to build the WASM and deploy the contract to Stellar Testnet.

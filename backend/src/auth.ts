@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { Keypair, StrKey } from "@stellar/stellar-sdk";

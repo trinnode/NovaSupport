@@ -19,6 +19,7 @@ import {
   verifySignature,
   signJWT,
   requireAuth,
+  optionalAuth,
   isValidStellarAddress,
   type AuthContext,
 } from "./auth.js";
@@ -32,7 +33,7 @@ import {
   setCachedLeaderboard,
   type LeaderboardSort,
 } from "./services/profile-leaderboard-cache.js";
-import { generateSignature } from "./services/webhook.js";
+import { processPendingWebhookDeliveries } from "./services/webhook-processor.js";
 import { sanitizeBody, sanitizeQuery } from "./middleware/sanitize.js";
 import { CircuitBreaker } from "./services/circuit-breaker.js";
 import {
@@ -218,8 +219,13 @@ function createRateLimiters() {
     message: { error: "Too many requests, please try again later." },
   });
 
-  return { globalLimiter, writeLimiter, viewCountLimiter };
-  return { globalLimiter, writeLimiter, profileCreationLimiter, resendLimiter };
+  return {
+    globalLimiter,
+    writeLimiter,
+    profileCreationLimiter,
+    resendLimiter,
+    viewCountLimiter,
+  };
 }
 
 // ── API versioning constants ───────────────────────────────────────────
@@ -292,8 +298,13 @@ function createAnalyticsCsv(transactions: any[]): string {
 
 export function createApp(customLogger?: Logger) {
   const app = express();
-//   const { globalLimiter, writeLimiter, viewCountLimiter } = createRateLimiters();
-  const { globalLimiter, writeLimiter, profileCreationLimiter, resendLimiter } = createRateLimiters();
+  const {
+    globalLimiter,
+    writeLimiter,
+    profileCreationLimiter,
+    resendLimiter,
+    viewCountLimiter,
+  } = createRateLimiters();
 
   const swaggerSpec = swaggerJsdoc({
     definition: {
@@ -1108,6 +1119,9 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *                   nullable: true
    *                 walletAddress:
    *                   type: string
+   *                 isOwner:
+   *                   type: boolean
+   *                   description: Present on authenticated requests; true when the JWT user owns this profile.
    *                 email:
    *                   type: string
    *                   nullable: true
@@ -1140,6 +1154,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    *               bio: "Stellar ecosystem builder"
    *               avatarUrl: "https://example.com/avatar.jpg"
    *               walletAddress: "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"
+   *               isOwner: true
    *               email: "john@example.com"
    *               websiteUrl: "https://johndoe.com"
    *               twitterHandle: "johndoe"
@@ -1166,7 +1181,7 @@ All errors return JSON with an \`error\` field and optional \`code\`:
    */
   // #463 — view count: increment once per IP per hour via viewCountLimiter
 //   app.get("/profiles/:username", async (req, res) => {
-  v1Router.get("/profiles/:username", async (req, res) => {
+  v1Router.get("/profiles/:username", optionalAuth, async (req, res) => {
     try {
       const profile = await prisma.profile.findUnique({
         where: { username: req.params.username },
@@ -1188,7 +1203,14 @@ All errors return JSON with an \`error\` field and optional \`code\`:
         // Non-fatal — do not block the response
       });
 
-      res.json(profile);
+      const responseBody: Record<string, unknown> = { ...profile };
+      if (req.auth) {
+        responseBody.isOwner = Boolean(
+          req.auth.userId && profile.ownerId === req.auth.userId,
+        );
+      }
+
+      res.json(responseBody);
     } catch (e: unknown) {
       req.log.error({ err: e }, "database error fetching profile");
       return sendError(res, 500, "Internal server error");
@@ -2945,29 +2967,35 @@ All errors return JSON with an \`error\` field and optional \`code\`:
           });
 
           for (const webhook of webhooks) {
-            const payload = JSON.stringify({
+            const payload = {
               event: "support.received",
+              id: supportRecord.id,
               txHash: supportRecord.txHash,
               amount: supportRecord.amount.toString(),
               assetCode: supportRecord.assetCode,
+              assetIssuer: supportRecord.assetIssuer ?? null,
+              status: supportRecord.status,
               message: supportRecord.message ?? null,
               memo: supportRecord.memo ?? null,
+              supporterAddress: supportRecord.supporterAddress ?? null,
+              recipientAddress: supportRecord.recipientAddress,
+              profileId: supportRecord.profileId,
               profileUsername: webhook.profile.username,
               createdAt: supportRecord.createdAt.toISOString(),
-            });
-
-            const signature = generateSignature(webhook.secret, JSON.parse(payload));
+            };
 
             // Persist for background delivery with exponential backoff (#webhook-persistence)
             await prisma.webhookDelivery.create({
               data: {
                 webhookId: webhook.id,
                 eventType: "support.received",
-                payload: JSON.parse(payload),
+                payload,
                 status: "pending",
               },
             });
           }
+
+          await processPendingWebhookDeliveries();
         } catch (err) {
           logger.error(
             { err, txHash: supportRecord.txHash },

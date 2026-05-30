@@ -66,6 +66,17 @@ changes to the contract.
 - **`support_count` is a best-effort metric.** It counts invocations of `support()`, not
   unique supporters or verified payments. Do not use it as a financial audit trail.
 
+## Deployment and upgrade security
+
+There is no privileged upgrade path for an existing contract ID. A contract change requires:
+
+1. Building and testing the new WASM locally with `cargo test` and `stellar contract build`.
+2. Deploying a new contract instance, which produces a new contract ID.
+3. Migrating any state that must survive the change by reading old contract state/events and initializing equivalent state in the new contract.
+4. Updating frontend and backend environment variables to the new contract ID only after Testnet verification.
+
+Keep the old contract ID in release notes and monitoring so historical events remain auditable. Never assume a frontend config change alone migrates on-chain state.
+
 ---
 
 ## Things to watch for when extending
